@@ -1,0 +1,21 @@
+# Correctness-focused clang-tidy policy for the engine's C++.
+# Avoids formatting, naming, readability, and modernization checks so lint only blocks likely defects.
+Checks: >
+  -*,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-nullability.*,
+  clang-analyzer-security.*,
+  clang-analyzer-unix.*,
+  bugprone-dangling-handle,
+  bugprone-infinite-loop,
+  bugprone-sizeof-expression,
+  bugprone-suspicious-memset-usage,
+  bugprone-suspicious-missing-comma,
+  bugprone-suspicious-semicolon,
+  bugprone-swapped-arguments,
+  bugprone-use-after-move
+WarningsAsErrors: 'clang-analyzer-*,bugprone-*'
+HeaderFilterRegex: '(^|.*/)(include/splendor|src)/.*'
+SystemHeaders: false
+FormatStyle: none

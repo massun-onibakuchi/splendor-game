@@ -1,0 +1,6 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/SplendorGameTargets.cmake")
+set_and_check(SplendorGame_DATADIR "@PACKAGE_SPLENDOR_GAME_DATADIR@")
+set(SplendorGame_CATALOG "${SplendorGame_DATADIR}/standard-catalog-v1/catalog.json")
+check_required_components(SplendorGame)

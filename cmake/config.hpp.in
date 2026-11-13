@@ -1,0 +1,8 @@
+#pragma once
+
+#include <string_view>
+
+namespace splendor {
+// The seed law's domain-separation tag, configured as SPLENDOR_GAME_SEED_NAMESPACE.
+inline constexpr std::string_view kSeedContract = "@SPLENDOR_GAME_SEED_NAMESPACE@";
+}  // namespace splendor

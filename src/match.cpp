@@ -1,0 +1,46 @@
+#include "splendor/match.hpp"
+
+#include <stdexcept>
+
+namespace splendor {
+
+std::string_view match_termination_name(const MatchTermination reason) {
+    switch (reason) {
+        case MatchTermination::TargetScoreEqualTurns: return "target_score_equal_turns";
+        case MatchTermination::MaxGamePlies: return "max_game_plies";
+        case MatchTermination::Timeout: return "timeout";
+    }
+    throw std::invalid_argument("unknown match termination");
+}
+
+MatchResult match_result(const TerminalFacts& terminal) {
+    return {
+        terminal.reason == TerminalReason::TargetScoreEqualTurns
+            ? MatchTermination::TargetScoreEqualTurns : MatchTermination::MaxGamePlies,
+        terminal.winner_seat, terminal.final_prestige, terminal.purchased_cards, std::nullopt};
+}
+
+MatchResult timeout_result(const State& state, const std::uint8_t loser) {
+    if (loser >= state.players.size()) throw std::invalid_argument("timeout seat is out of range");
+    // Two-player adjudication, not a container-size assumption. Multiplayer forfeits
+    // need their own outcome law when the game adds multiplayer support.
+    static_assert(kPlayerCount == 2);
+    MatchResult result{MatchTermination::Timeout, next_seat(loser), {}, {}, loser};
+    for (std::size_t seat = 0; seat < state.players.size(); ++seat) {
+        result.final_prestige[seat] = state.players[seat].prestige;
+        result.purchased_cards[seat] = state.players[seat].purchased_cards;
+    }
+    return result;
+}
+
+std::optional<MatchResult> adjudicate_timeout(
+    const GameClock& clock, const State& state, const double now_ms) {
+    const auto actor = clock.actor();
+    if (!actor || !clock.loses_on_time(*actor) || !clock.expired(now_ms)) return std::nullopt;
+    if (*actor != state.current_player) {
+        throw std::logic_error("match clock does not belong to the pending actor");
+    }
+    return timeout_result(state, *actor);
+}
+
+}  // namespace splendor

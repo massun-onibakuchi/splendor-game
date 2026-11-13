@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.so
+*.egg-info/
+python/splendor_game/engine.cpp
+python/splendor_game/_core/
+.DS_Store

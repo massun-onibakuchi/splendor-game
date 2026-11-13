@@ -1,0 +1,81 @@
+# Engine (CMake/CTest, benchmark smoke) and Python package (binding + play host) checks.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Benchmark smoke
+        run: ./build/splendor_game_benchmark 200
+      - name: Install the CMake package
+        run: cmake --install build --prefix "$RUNNER_TEMP/splendor-game"
+      - name: Consume the installed package
+        run: |
+          consumer="$RUNNER_TEMP/consumer"
+          mkdir -p "$consumer"
+          cat > "$consumer/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.20)
+          project(consumer LANGUAGES CXX)
+          find_package(SplendorGame CONFIG REQUIRED)
+          add_executable(consumer main.cpp)
+          target_link_libraries(consumer PRIVATE splendor::game)
+          target_compile_definitions(consumer PRIVATE CATALOG="${SplendorGame_CATALOG}")
+          EOF
+          cat > "$consumer/main.cpp" <<'EOF'
+          #include "splendor/episode.hpp"
+          int main() {
+              const splendor::Catalog catalog = splendor::Catalog::load(CATALOG);
+              splendor::TurnEpisode episode(catalog, 160, 1, 2);
+              while (!episode.is_terminal()) episode.select(std::size_t{0});
+              return 0;
+          }
+          EOF
+          cmake -S "$consumer" -B "$consumer/build" -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/splendor-game"
+          cmake --build "$consumer/build"
+          "$consumer/build/consumer"
+
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        python: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - name: Build and install
+        run: uv sync --locked
+      - name: Test
+        run: uv run --no-sync pytest -q
+      - name: Build the wheel
+        run: uv build --wheel

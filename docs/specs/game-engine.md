@@ -54,13 +54,10 @@ batched producer playing the same seeds and choices reach the same states.
 chance and forced decisions, exposes the pending legal choices and records a replayable
 trace of typed steps (the choice, the visible nobles it names, its draw facts); keys and
 renderings derive from a step on demand, so recording costs no formatting and a recorded
-game plays as fast as the trusted staged primitives. It plays every choice through the
-same `detail::play_choice` as a batched producer, reading back what the environment did
-(`detail::PlayedChoice`), so there is one environment law. It borrows an immutable catalog
-that MUST outlive it (the Python `Episode` keeps its `Catalog` alive). `view(seat)` is that
-seat's knowledge; `world()` is the host's omniscient state, never an agent input. Views and
-references to legal choices expire at selection; a holder of a detached copy binds it to
-the decision through its host (the play host's job and revision).
+game plays as fast as the trusted staged primitives. It borrows an immutable catalog that
+MUST outlive it (the Python `Episode` keeps its `Catalog` alive). `view(seat)` is that seat's knowledge; `world()` is the host's
+omniscient state, never an agent input. Views and references to legal choices expire at
+selection.
 
 Native and columnar agents select by index into the current legal choices; untrusted or
 persisted submissions select by key, checked against the current decision and rejected

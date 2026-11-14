@@ -30,8 +30,8 @@ void TurnEpisode::settle() {
     }
 }
 
-// Plays `choice` under `detail::play_choice` and records it, the draw it owed and, after a
-// MAIN, the forced cleanup that completed its turn.
+// `detail::play_choice`, recording the choice, the draw it owed and, after a MAIN, the
+// forced cleanup that completed its turn.
 void TurnEpisode::apply(const TurnChoice& choice, const bool forced) {
     TurnTraceStep step;
     step.game_ply = decision_.state.game_ply;

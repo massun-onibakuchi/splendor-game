@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Native Splendor engine (`include/`, `src/`, C++20), its Cython binding
-(`python/splendor_game`) and the practical-play host (`python/splendor_play`, stdlib only).
+(`python/splendor_game`) and the practical-play host (`python/splendor_play`).
 
 ## Environment
 
@@ -13,11 +13,7 @@ Native Splendor engine (`include/`, `src/`, C++20), its Cython binding
 ## Design stance
 
 - **Independent.** Nothing here imports, links or names model, search, feature, training
-  or experiment code. Consumers build on the engine; the engine never anticipates one.
-- **Contracts are persisted.** `splendor-*-vN` identifiers name what consumers keep:
-  change behavior only with a new version. The seed namespace is a build constant
-  (`SPLENDOR_GAME_SEED_NAMESPACE`); never change the default.
-- **Trusted fast paths** stay in `splendor/detail/` and trust only engine-produced inputs.
+  or experiment code. Consumers build on the engine.
 - **Fast paths stay native.** No Python object per choice or per state on any bulk path;
   expose buffers. Measure engine changes with `benchmarks/playout_benchmark.cpp`; a
   checksum change means play changed.

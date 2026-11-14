@@ -33,11 +33,9 @@ human is "Human" and an agent its actor's name, and a name several seats would s
 numbered in seat order ("Human 1", "Human 2"; "A #1", "A #2"). Logs, exports and the board
 name seats by it.
 
-[agents.py](../../python/splendor_play/agents.py) owns the agent protocol. An agent warms
-its session before any clock runs. Each job starts it with read-only views of the job's
-decision and the running clock, then runs until it decides or the job ends; a move is an
-index into the job's decision's legal choices. Reports are optional, display and evidence
-only, never commands.
+[agents.py](../../python/splendor_play/agents.py) owns the agent protocol: an agent warms
+before any clock runs, and each job hands it read-only views of the job's decision and the
+running clock. Reports are optional display and evidence, never commands.
 
 The native host schedules one job at a time and the host language runs it:
 
@@ -47,8 +45,8 @@ The native host schedules one job at a time and the host language runs it:
 - **Review:** a finished game's reviewed position, searched by its actor when that is an
   agent, else by the first agent seat. Review is display-only, never logged or archived.
 
-Only the current job may publish or select; a stale job's work is discarded. Pause ends a
-job and discards its selection; agents keep whatever they retain. The host
+Only the current job may publish or select; a stale job's work is discarded. Pause ends the
+job and discards its selection. The host
 adjudicates time before accepting any selection. Human submissions name the decision's
 revision and are validated keys; agents' selections are indexes of the current job's
 decision. Persisted keys remain validated inputs.

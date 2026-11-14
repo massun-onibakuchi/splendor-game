@@ -14,19 +14,16 @@ Native Splendor engine (`include/`, `src/`, C++20), its Cython binding
 
 - **Independent.** Nothing here imports, links or names model, search, feature, training
   or experiment code. Consumers build on the engine; the engine never anticipates one.
-- **End state first.** No compatibility shims or deprecation paths unless requested.
 - **Contracts are persisted.** `splendor-*-vN` identifiers name what consumers keep:
   change behavior only with a new version. The seed namespace is a build constant
   (`SPLENDOR_GAME_SEED_NAMESPACE`); never change the default.
-- **Small surfaces.** Public headers and explicit Python exports; trusted fast paths stay
-  in `splendor/detail/` and trust only engine-produced inputs.
+- **Trusted fast paths** stay in `splendor/detail/` and trust only engine-produced inputs.
 - **Fast paths stay native.** No Python object per choice or per state on any bulk path;
   expose buffers. Measure engine changes with `benchmarks/playout_benchmark.cpp`; a
   checksum change means play changed.
-- **Known extensions.** Two players today, three and four planned: seat arguments, not
-  `1 - seat` arithmetic.
+- **Seats are arguments**, not `1 - seat` arithmetic: three and four players are planned.
 
 ## Docs
 
-`docs/specs/` holds the normative contracts, one per subsystem
-([index](docs/specs/spec.md)). Change a spec when its contract changes, in the same change.
+[`docs/specs/`](docs/specs/spec.md) holds the normative contracts; change a spec in the
+same change as its contract.

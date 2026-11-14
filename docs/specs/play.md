@@ -28,7 +28,10 @@ files; the host does not know how an agent searches or what model it runs.
 A match has two to four seats; seat 0 starts. The board's request names each seat:
 `{kind: "human"}` or `{kind: "agent", actor, ponder}`, where `actor` is an offered actor's
 name. The host resolves it to the actor's stable `identity` (game IDs carry it; archives
-group results by it) and logged summary. Humans are named by seat order when several play.
+group results by it) and logged summary. Each seat's name is unique within the match: a
+human is "Human" and an agent its actor's name, and a name several seats would share is
+numbered in seat order ("Human 1", "Human 2"; "A #1", "A #2"). Logs, exports and the board
+name seats by it.
 
 [agents.py](../../python/splendor_play/agents.py) owns the agent protocol. An agent warms
 its session before any clock runs, detaches a root from a read-only view of the episode a

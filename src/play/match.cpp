@@ -640,8 +640,8 @@ void Match::record(
         const TurnTraceStep& step = trace[position];
         const TurnChoice& choice = step.choice;
         if (choice.phase == DecisionPhase::Main
-            && (choice.primary.family == CandidateFamily::BuyVisible
-                || choice.primary.family == CandidateFamily::BuyReserved)) {
+            && (choice.primary.family == PrimaryFamily::BuyVisible
+                || choice.primary.family == PrimaryFamily::BuyReserved)) {
             purchases_[step.actor].push_back(*choice.primary.target_card_id);
         }
         if (choice.phase == DecisionPhase::Cleanup && choice.noble_slot && step.noble_ids[*choice.noble_slot]) {

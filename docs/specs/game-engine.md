@@ -93,6 +93,11 @@ A consumer stages or groups leaves at its own granularity (one gem at a time, ca
 payment, return then noble, …) by filtering these columns, then selects the remaining
 leaf by index. Columns are typed buffers: no Python object per choice.
 
+A consumer that plans whole turns composes the staged transitions: `apply_main` exposes a
+choice's draw outcomes and cleanup support before any draw, `resolve_main` places a draw
+and `apply_cleanup` completes the turn. No surface fixes a turn's cleanup before its
+draw: that cleanup belongs to a decision taken after the draw, with what it reveals.
+
 ## Match clock and result
 
 [`GameClock`](../../include/splendor/clock.hpp) owns elapsed time and per-seat timeout
@@ -121,9 +126,9 @@ Engine hot paths are the trusted primitives: they reuse caller buffers, derive c
 from fields rather than formatted keys, keep set-valued fields (eligible nobles, winners)
 as bitmasks, and never revalidate engine-produced decisions.
 [`playout_benchmark.cpp`](../../benchmarks/playout_benchmark.cpp) measures uniform playouts
-at any seat count through the staged primitives, the recorded episode and the atomic
-adapter; its checksum ties each surface's play to its seed, so a change that alters play is
-visible before its timing is compared.
+at any seat count through the staged primitives and the recorded episode; its checksum
+ties each surface's play to its seed, so a change that alters play is visible before its
+timing is compared.
 
 ## Seat counts
 

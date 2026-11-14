@@ -14,8 +14,7 @@ must be understood before deviation.
 | Area | Owner |
 | --- | --- |
 | Library boundary, game execution, choice surfaces, clocks and match adjudication | [Game engine](game-engine.md) |
-| Rules, turn phases, chance, staged keys/order, action tree and atomic adapter | [Staged actions](staged-actions.md) |
-| Effective-action equivalence, keys and leaf order | [Action canonicalization](action-canonicalization.md) |
+| Rules, turn phases, primary effects, chance, staged keys/order and action tree | [Staged actions](staged-actions.md) |
 | Seat knowledge, views and noninterference | [Observations](observations.md) |
 | Seat-agnostic native match host, agent schedule, log, archive and server | [Practical play](play.md) |
 

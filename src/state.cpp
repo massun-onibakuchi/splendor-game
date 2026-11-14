@@ -1,7 +1,7 @@
 #include "splendor/state.hpp"
 
 #include "splendor/seed.hpp"
-#include "splendor/transition.hpp"
+#include "splendor/terminal.hpp"
 
 #include <algorithm>
 #include <array>

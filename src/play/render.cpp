@@ -1,6 +1,5 @@
 #include "splendor/play/render.hpp"
 
-#include "splendor/detail/transition.hpp"
 #include "splendor/detail/turn.hpp"
 
 #include <algorithm>
@@ -126,15 +125,15 @@ std::string choice_json(
             + ",\"noble_slot\":" + json(choice.noble_slot)
             + ",\"noble\":" + (choice.noble_slot ? json(noble_at(*choice.noble_slot)) : "null") + '}';
     }
-    const CandidateDescriptor& primary = choice.primary;
+    const Primary& primary = choice.primary;
     std::optional<std::size_t> market_slot;
-    if (primary.source_slot) market_slot = market_index(*primary.source_tier, *primary.source_slot);
+    if (primary.source_slot) market_slot = detail::market_index(*primary.source_tier, *primary.source_slot);
     std::vector<std::uint16_t> nobles;
     for (std::uint8_t slot = 0; slot < kMaxVisibleNobles; ++slot) {
         if (!contains(choice.eligible_nobles, slot)) continue;
         if (const std::optional<std::uint16_t> id = noble_at(slot)) nobles.push_back(*id);
     }
-    return out + ",\"family\":\"" + std::string(candidate_family_name(primary.family)) + "\""
+    return out + ",\"family\":\"" + std::string(primary_family_name(primary.family)) + "\""
         + ",\"delta\":" + json(primary.token_delta)
         + ",\"payment\":" + json(primary.payment)
         + ",\"tier\":" + json(primary.source_tier)
@@ -200,32 +199,32 @@ std::string choice_text(
         }
         return out.empty() ? "ended the turn" : out;
     }
-    const CandidateDescriptor& primary = choice.primary;
+    const Primary& primary = choice.primary;
     constexpr std::size_t kGold = static_cast<std::size_t>(Color::Gold);
     const std::string gold = primary.token_delta[kGold] > 0 ? " +1 gold" : "";
     switch (primary.family) {
-        case CandidateFamily::Take: {
+        case PrimaryFamily::Take: {
             if (is_null_take(primary)) return "took no tokens (the null move at ten tokens)";
             const std::string returned = token_list(primary.token_delta, -1);
             return "took " + token_list(primary.token_delta)
                 + (returned == "nothing" ? "" : " and returned " + returned);
         }
-        case CandidateFamily::PassForced:
+        case PrimaryFamily::PassForced:
             return "passed (no legal action)";
-        case CandidateFamily::ReserveBlind:
+        case PrimaryFamily::ReserveBlind:
             return "reserved a tier-" + std::to_string(*primary.source_tier) + " card from the deck" + gold;
-        case CandidateFamily::ReserveVisible:
-        case CandidateFamily::BuyVisible:
-        case CandidateFamily::BuyReserved:
+        case PrimaryFamily::ReserveVisible:
+        case PrimaryFamily::BuyVisible:
+        case PrimaryFamily::BuyReserved:
             break;
     }
     const Card& card = catalog.card(*primary.target_card_id);
     const std::string label = "tier-" + std::to_string(card.tier) + ' '
         + std::string(kColorNames[static_cast<std::size_t>(card.bonus)]) + " card #"
         + std::to_string(card.id) + " (" + std::to_string(card.prestige) + " pt)";
-    if (primary.family == CandidateFamily::ReserveVisible) return "reserved " + label + gold;
+    if (primary.family == PrimaryFamily::ReserveVisible) return "reserved " + label + gold;
     return "bought " + label
-        + (primary.family == CandidateFamily::BuyReserved ? " from reserve" : " from market")
+        + (primary.family == PrimaryFamily::BuyReserved ? " from reserve" : " from market")
         + " paying " + token_list(primary.payment);
 }
 

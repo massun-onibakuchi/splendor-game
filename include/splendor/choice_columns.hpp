@@ -24,7 +24,7 @@ struct ChoiceColumns {
     std::vector<std::uint8_t> family;
     std::vector<std::uint16_t> intent;
     std::vector<std::uint8_t> null_take;
-    // MAIN: the primary's `CandidateFamily`, net token delta, payment, source tier
+    // MAIN: the primary's `PrimaryFamily`, net token delta, payment, source tier
     // (1-3), tier-major market slot (0-11), own reserve slot, target card and the
     // bitmask of visible noble slots eligible once it applies.
     std::vector<std::uint8_t> primary;

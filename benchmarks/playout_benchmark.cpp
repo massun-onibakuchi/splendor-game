@@ -1,13 +1,11 @@
-// Uniform-random playouts through the engine's three execution surfaces:
+// Uniform-random playouts through the engine's two execution surfaces:
 //
 //   staged    trusted staged primitives (`detail::play_forced`, `detail::play_choice`)
 //   recorded  the recorded `TurnEpisode` a match host drives, its trace drained per choice
-//   atomic    the atomic adapter (`generate_candidates`, `detail::play_decision`)
 //
 // Usage: splendor_game_benchmark [games] [seed] [players]. The checksum ties each surface's
 // play to its seed, so a change that alters play shows here before it shows in timings.
 
-#include "splendor/candidate.hpp"
 #include "splendor/catalog.hpp"
 #include "splendor/episode.hpp"
 #include "splendor/seed.hpp"
@@ -96,32 +94,6 @@ Totals recorded(
     return totals;
 }
 
-Totals atomic(
-    const Catalog& catalog, const std::uint8_t players, const std::uint64_t games,
-    const std::uint64_t seed) {
-    Totals totals;
-    const auto start = Clock::now();
-    for (std::uint64_t game = 0; game < games; ++game) {
-        const std::array<std::uint64_t, 1> coordinate{game};
-        const detail::EpisodeSeeds seeds(derive64(seed, "benchmark-episode", coordinate));
-        State state = initial_state(catalog, players, kMaxGamePlies, derive64(seed, "benchmark-setup", coordinate));
-        std::uint32_t ordinal = 0;
-        for (;;) {
-            const CandidateBatch leaves = generate_candidates(state, kMaxGamePlies, catalog);
-            const CandidateDescriptor& chosen = leaves.rows[pick(seeds.decision(state), leaves.rows.size())];
-            const std::uint64_t draw = seeds.draw(state);
-            ++totals.decisions;
-            if (const std::optional<TerminalFacts> terminal = detail::play_decision(
-                    state, ordinal, chosen, draw, kMaxGamePlies, catalog)) {
-                totals.checksum += score(*terminal);
-                break;
-            }
-        }
-    }
-    totals.seconds = std::chrono::duration<double>(Clock::now() - start).count();
-    return totals;
-}
-
 void report(const char* name, const std::uint64_t games, const Totals& totals) {
     std::printf(
         "%-8s games=%llu decisions=%llu seconds=%.3f decisions/s=%.0f games/s=%.1f checksum=%llu\n",
@@ -142,6 +114,5 @@ int main(const int argc, char** argv) {
     const Catalog catalog = Catalog::load(SPLENDOR_GAME_CATALOG);
     report("staged", games, staged(catalog, players, games, seed));
     report("recorded", games, recorded(catalog, players, games, seed));
-    report("atomic", games, atomic(catalog, players, games, seed));
     return 0;
 }

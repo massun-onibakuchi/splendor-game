@@ -1,6 +1,6 @@
 #include "splendor/choice_columns.hpp"
 
-#include "splendor/detail/transition.hpp"
+#include "splendor/detail/turn.hpp"
 
 #include <algorithm>
 
@@ -49,14 +49,14 @@ void write_choice_columns(const std::span<const TurnChoice> choices, ChoiceColum
             out.noble_slot[row] = field(choice.noble_slot);
             continue;
         }
-        const CandidateDescriptor& primary = choice.primary;
+        const Primary& primary = choice.primary;
         out.primary[row] = static_cast<std::uint8_t>(primary.family);
         std::copy(primary.token_delta.begin(), primary.token_delta.end(), out.token_delta.begin() + wide);
         std::copy(primary.payment.begin(), primary.payment.end(), out.payment.begin() + wide);
         out.tier[row] = field(primary.source_tier);
         if (primary.source_tier && primary.source_slot) {
             out.market_slot[row] =
-                static_cast<std::uint8_t>(market_index(*primary.source_tier, *primary.source_slot));
+                static_cast<std::uint8_t>(detail::market_index(*primary.source_tier, *primary.source_slot));
         }
         out.reserve_slot[row] = field(primary.reserve_slot);
         out.card[row] = primary.target_card_id ? *primary.target_card_id : kNoChoiceCard;

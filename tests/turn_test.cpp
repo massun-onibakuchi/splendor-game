@@ -2,7 +2,6 @@
 
 #include "splendor/action_tree.hpp"
 #include "splendor/detail/episode.hpp"
-#include "splendor/detail/transition.hpp"
 #include "splendor/detail/turn.hpp"
 
 #include <gtest/gtest.h>
@@ -18,10 +17,8 @@
 
 namespace {
 
-using splendor::CandidateBatch;
-using splendor::CandidateDescriptor;
-using splendor::CandidateFamily;
 using splendor::Catalog;
+using splendor::PrimaryFamily;
 using splendor::Decision;
 using splendor::DecisionPhase;
 using splendor::MainOutcome;
@@ -43,24 +40,27 @@ std::vector<TurnChoice> choices_of(const Decision& decision, const Catalog& cata
     return splendor::decision_choices(decision, kMaxGamePlies, catalog);
 }
 
+// The turn start at `plies` completed turns of a game that prefers `preferred` at every
+// MAIN and takes the first cleanup, its draws made by the episode law.
 State advanced_state(
     const Catalog& catalog,
     const std::uint64_t setup_seed,
-    const std::size_t decisions,
-    const CandidateFamily preferred = CandidateFamily::ReserveVisible) {
-    State state = splendor::initial_state(catalog, 2, kMaxGamePlies, setup_seed);
-    for (std::size_t decision = 0; decision < decisions; ++decision) {
-        const CandidateBatch candidates =
-            splendor::generate_candidates(state, kMaxGamePlies, catalog);
-        auto chosen = std::find_if(
-            candidates.rows.begin(), candidates.rows.end(),
-            [&](const CandidateDescriptor& row) { return row.family == preferred; });
-        if (chosen == candidates.rows.end()) chosen = candidates.rows.begin();
-        const splendor::TransitionResult transition =
-            splendor::apply_candidate(state, kMaxGamePlies, catalog, *chosen);
-        state = splendor::select_episode_outcome(transition, kMaxGamePlies, catalog, 900 + decision);
+    const std::uint32_t plies,
+    const PrimaryFamily preferred = PrimaryFamily::ReserveVisible) {
+    Decision decision = main_decision(splendor::initial_state(catalog, 2, kMaxGamePlies, setup_seed));
+    const splendor::detail::EpisodeSeeds seeds(900 + setup_seed);
+    std::vector<TurnChoice> choices;
+    while (decision.state.game_ply < plies) {
+        splendor::detail::legal_choices(decision, catalog, choices);
+        auto chosen = std::find_if(choices.begin(), choices.end(), [&](const TurnChoice& choice) {
+            return choice.phase == DecisionPhase::Main && choice.primary.family == preferred;
+        });
+        if (chosen == choices.end()) chosen = choices.begin();
+        if (splendor::detail::play_choice(decision, *chosen, seeds, kMaxGamePlies, catalog)) {
+            throw std::logic_error("the fixture game ended early");
+        }
     }
-    return state;
+    return decision.state;
 }
 
 // Ten held tokens and gold in the bank: a visible reserve overflows by its gold.
@@ -99,7 +99,7 @@ State noble_ready_root(
 
 TurnChoice find_main(
     const std::vector<TurnChoice>& choices,
-    const CandidateFamily family,
+    const PrimaryFamily family,
     const std::function<bool(const TurnChoice&)>& accept = [](const TurnChoice&) { return true; }) {
     const auto found = std::find_if(choices.begin(), choices.end(), [&](const TurnChoice& choice) {
         return choice.primary.family == family && accept(choice);
@@ -108,114 +108,71 @@ TurnChoice find_main(
     return *found;
 }
 
-State with_refill(State state, const MainOutcome& outcome, const std::uint16_t card) {
-    state.market_card_ids[splendor::market_index(outcome.draw->tier, outcome.draw->slot)] = card;
-    state.unknown_card_ids.erase(
-        std::find(state.unknown_card_ids.begin(), state.unknown_card_ids.end(), card));
-    return state;
-}
-
-// The staged turn of every complete effective leaf, under every lawful draw, equals the
-// atomic engine's turn: the leaf's precommitted MAIN and CLEANUP keys are legal, the
-// staged paths biject with the leaves of the no-blind MAIN primaries, and every
-// successor and terminal fact agrees. A blind reservation has no leaf: its return is
-// chosen after a draw its owner alone sees. An ending atomic turn leaves its refill
-// undrawn; a staged turn whose cleanup is discretionary draws it first, and must equal
-// the atomic successor once that card is placed. Returns the number of (leaf, draw)
-// turns compared.
-std::size_t expect_atomic_conformance(const State& state, const Catalog& catalog) {
+// Every MAIN choice of the turn start `state`, under every lawful draw and every cleanup
+// that follows, completes its turn: the cleanup support is known before the draw, an
+// exposed CLEANUP is the same actor's valid decision offering exactly that support, each
+// successor is a valid turn start or terminal, and terminal facts never read the draw.
+// Returns the number of (choice, draw, cleanup) turns completed.
+std::size_t expect_complete_turns(const State& state, const Catalog& catalog) {
     const Decision root = main_decision(state);
-    const std::vector<TurnChoice> mains = choices_of(root, catalog);
-    const CandidateBatch leaves = splendor::generate_candidates(state, kMaxGamePlies, catalog);
-    std::size_t pairs = 0;
-    for (const TurnChoice& main : mains) {
-        EXPECT_FALSE(main.primary.chosen_noble_slot.has_value());
-        if (main.primary.family == splendor::CandidateFamily::ReserveBlind) {
-            EXPECT_THROW(
-                static_cast<void>(splendor::leaf_path(state, main.primary)), std::invalid_argument);
-            continue;
-        }
-        pairs += splendor::apply_main(root, main, kMaxGamePlies, catalog).cleanup_count;
-    }
-    EXPECT_EQ(pairs, leaves.rows.size());
-    for (const CandidateDescriptor& leaf : leaves.rows) {
-        EXPECT_NE(leaf.family, splendor::CandidateFamily::ReserveBlind);
-    }
-    std::set<std::pair<std::string, std::string>> paths;
-    std::size_t compared = 0;
-    for (const CandidateDescriptor& leaf : leaves.rows) {
-        const splendor::LeafPath path = splendor::leaf_path(state, leaf);
-        EXPECT_TRUE(paths.emplace(path.main_key, path.cleanup_key).second) << leaf.action_key;
-        const TurnChoice& main = splendor::find_choice(mains, path.main_key);
+    std::size_t completed = 0;
+    for (const TurnChoice& main : choices_of(root, catalog)) {
         const MainOutcome outcome = splendor::apply_main(root, main, kMaxGamePlies, catalog);
-        const splendor::TransitionResult atomic =
-            splendor::apply_candidate(state, kMaxGamePlies, catalog, leaf);
-        // The cleanup of a forced turn is the leaf's own; a discretionary one is chosen
-        // by the leaf's key after the draw.
-        const auto finish = [&](const TurnStep& step) -> TurnStep {
-            if (step.decision.phase != DecisionPhase::Cleanup) {
-                EXPECT_EQ(outcome.cleanup_count, 1U);
-                return step;
-            }
-            EXPECT_GT(outcome.cleanup_count, 1U);
-            EXPECT_EQ(step.decision.state.current_player, state.current_player);
-            EXPECT_TRUE(splendor::validate_decision(step.decision, kMaxGamePlies, catalog));
-            const std::vector<TurnChoice> cleanups = choices_of(step.decision, catalog);
-            EXPECT_EQ(cleanups.size(), outcome.cleanup_count);
-            return splendor::apply_cleanup(
-                step.decision, splendor::find_choice(cleanups, path.cleanup_key), kMaxGamePlies,
-                catalog);
-        };
-        if (outcome.terminal) {
-            EXPECT_EQ(outcome.terminal, atomic.terminal) << leaf.action_key;
-            EXPECT_EQ(outcome.state, atomic.state) << leaf.action_key;
-            ++compared;
-            continue;
-        }
-        if (atomic.awaiting_refill()) {
-            EXPECT_EQ(outcome.draw->tier, *atomic.refill_tier);
-            EXPECT_EQ(outcome.draw->slot, *atomic.refill_market_slot);
-            EXPECT_EQ(outcome.outcome_card_ids, splendor::chance_outcome_card_ids(atomic, catalog));
-            for (const std::uint16_t card : outcome.outcome_card_ids) {
-                const TurnStep step = finish(
-                    splendor::resolve_main(outcome, card, kMaxGamePlies, catalog));
-                EXPECT_FALSE(step.terminal.has_value());
-                EXPECT_EQ(
-                    step.decision.state,
-                    splendor::resolve_chance_outcome(atomic, kMaxGamePlies, catalog, card))
-                    << leaf.action_key;
-                ++compared;
-            }
-            continue;
-        }
+        EXPECT_GE(outcome.cleanup_count, 1U);
+        EXPECT_EQ(outcome.draw.has_value(), !outcome.outcome_card_ids.empty());
         std::vector<std::optional<std::uint16_t>> draws(
             outcome.outcome_card_ids.begin(), outcome.outcome_card_ids.end());
         if (draws.empty()) draws.emplace_back(std::nullopt);
-        // A nonterminal atomic turn owes no draw; an ending one may leave it undrawn.
-        if (!atomic.terminal) EXPECT_FALSE(outcome.draw.has_value()) << leaf.action_key;
+        // The terminal facts of each cleanup under the first draw; every draw must agree.
+        std::vector<std::optional<splendor::TerminalFacts>> endings;
         for (const auto card : draws) {
-            const TurnStep step = finish(
-                splendor::resolve_main(outcome, card, kMaxGamePlies, catalog));
-            EXPECT_EQ(step.terminal, atomic.terminal) << leaf.action_key;
-            EXPECT_EQ(
-                step.decision.state, card ? with_refill(atomic.state, outcome, *card) : atomic.state)
-                << leaf.action_key;
-            ++compared;
+            const TurnStep step = splendor::resolve_main(outcome, card, kMaxGamePlies, catalog);
+            std::vector<TurnStep> finished;
+            if (step.decision.phase == DecisionPhase::Cleanup) {
+                EXPECT_GT(outcome.cleanup_count, 1U);
+                EXPECT_EQ(step.decision.state.current_player, state.current_player);
+                EXPECT_TRUE(splendor::validate_decision(step.decision, kMaxGamePlies, catalog));
+                const std::vector<TurnChoice> cleanups = choices_of(step.decision, catalog);
+                EXPECT_EQ(cleanups.size(), outcome.cleanup_count);
+                for (const TurnChoice& cleanup : cleanups) {
+                    finished.push_back(
+                        splendor::apply_cleanup(step.decision, cleanup, kMaxGamePlies, catalog));
+                }
+            } else {
+                EXPECT_EQ(outcome.cleanup_count, 1U);
+                finished.push_back(step);
+            }
+            const bool first_draw = endings.empty();
+            for (std::size_t index = 0; index < finished.size(); ++index) {
+                const TurnStep& done = finished[index];
+                EXPECT_EQ(done.decision.phase, DecisionPhase::Main);
+                if (!done.terminal) {
+                    EXPECT_NE(done.decision.state.game_ply, state.game_ply);
+                    EXPECT_TRUE(
+                        splendor::validate_decision(done.decision, kMaxGamePlies, catalog));
+                }
+                if (first_draw) {
+                    endings.push_back(done.terminal);
+                } else if (index < endings.size()) {
+                    EXPECT_EQ(done.terminal, endings[index]) << splendor::choice_key(main);
+                }
+                ++completed;
+            }
+            EXPECT_EQ(finished.size(), endings.size());
         }
     }
-    EXPECT_EQ(paths.size(), leaves.rows.size());
-    return compared;
+    return completed;
 }
 
-TEST(StagedTurn, LeafPathsBijectAndReproduceTheAtomicTurn) {
+TEST(StagedTurn, EveryTurnCompletesToAValidSuccessor) {
     const Catalog catalog = load_catalog();
     for (const std::uint64_t seed : {2468U, 13U, 77U, 31U}) {
-        for (const std::size_t depth : {0U, 6U, 14U, 22U}) {
-            for (const CandidateFamily preferred :
-                 {CandidateFamily::ReserveVisible, CandidateFamily::Take}) {
+        for (const std::uint32_t plies : {0U, 6U, 14U, 22U}) {
+            for (const PrimaryFamily preferred :
+                 {PrimaryFamily::ReserveVisible, PrimaryFamily::Take}) {
                 EXPECT_GT(
-                    expect_atomic_conformance(
-                        advanced_state(catalog, seed, depth, preferred), catalog),
+                    expect_complete_turns(
+                        advanced_state(catalog, seed, plies, preferred), catalog),
                     0U);
             }
         }
@@ -227,7 +184,7 @@ TEST(StagedTurn, ReserveCommitsItsGoldAndReturnsAfterTheRefill) {
     const State state = ten_token_reserve_state(catalog);
     const Decision root = main_decision(state);
     const std::vector<TurnChoice> mains = choices_of(root, catalog);
-    const TurnChoice& reserve = find_main(mains, CandidateFamily::ReserveVisible);
+    const TurnChoice& reserve = find_main(mains, PrimaryFamily::ReserveVisible);
     EXPECT_EQ(reserve.primary.token_delta[kGoldIndex], 1);
     EXPECT_TRUE(splendor::choice_key(reserve).starts_with("main|"));
     const MainOutcome outcome = splendor::apply_main(root, reserve, kMaxGamePlies, catalog);
@@ -243,7 +200,7 @@ TEST(StagedTurn, ReserveCommitsItsGoldAndReturnsAfterTheRefill) {
         // and the unclipped eleven-token holding awaits its return.
         EXPECT_EQ(splendor::token_count(cleanup.players[state.current_player]), 11U);
         EXPECT_EQ(
-            cleanup.market_card_ids[splendor::market_index(outcome.draw->tier, outcome.draw->slot)],
+            cleanup.market_card_ids[splendor::detail::market_index(outcome.draw->tier, outcome.draw->slot)],
             card);
         EXPECT_EQ(cleanup.unknown_card_ids.size() + 1, state.unknown_card_ids.size());
         decks.insert(cleanup.unknown_card_ids);
@@ -267,7 +224,7 @@ TEST(StagedTurn, ReserveCommitsItsGoldAndReturnsAfterTheRefill) {
     no_gold.players[1 - no_gold.current_player].tokens[kGoldIndex] = no_gold.bank_tokens[kGoldIndex];
     no_gold.bank_tokens[kGoldIndex] = 0;
     const Decision dry = main_decision(no_gold);
-    const TurnChoice& plain = find_main(choices_of(dry, catalog), CandidateFamily::ReserveVisible);
+    const TurnChoice& plain = find_main(choices_of(dry, catalog), PrimaryFamily::ReserveVisible);
     for (const auto value : plain.primary.token_delta) EXPECT_EQ(value, 0);
     const MainOutcome forced = splendor::apply_main(dry, plain, kMaxGamePlies, catalog);
     EXPECT_EQ(forced.cleanup_count, 1U);
@@ -282,7 +239,7 @@ TEST(StagedTurn, ReserveCommitsItsGoldAndReturnsAfterTheRefill) {
 TEST(StagedTurn, OnlyTheActorMayExceedTheHoldLimitMidTurn) {
     const Catalog catalog = load_catalog();
     const Decision root = main_decision(ten_token_reserve_state(catalog));
-    const TurnChoice reserve = find_main(choices_of(root, catalog), CandidateFamily::ReserveVisible);
+    const TurnChoice reserve = find_main(choices_of(root, catalog), PrimaryFamily::ReserveVisible);
     const MainOutcome outcome = splendor::apply_main(root, reserve, kMaxGamePlies, catalog);
     const TurnStep step =
         splendor::resolve_main(outcome, outcome.outcome_card_ids.front(), kMaxGamePlies, catalog);
@@ -416,7 +373,7 @@ TEST(StagedTurn, ActionTreeGroupsGainsAndPurchasesByIntent) {
     std::uint16_t next = 0;
     for (std::size_t index = 0; index < mains.size(); ++index) {
         const ActionNode& node = nodes[index];
-        const CandidateDescriptor& primary = mains[index].primary;
+        const splendor::Primary& primary = mains[index].primary;
         ASSERT_LE(node.intent, next);
         if (node.intent == next) ++next;
         ++members[node.intent];
@@ -424,15 +381,15 @@ TEST(StagedTurn, ActionTreeGroupsGainsAndPurchasesByIntent) {
         EXPECT_TRUE(fresh || known->second == node.family) << splendor::choice_key(mains[index]);
         EXPECT_EQ(node.null, splendor::is_null_take(primary));
         nulls += node.null;
-        if (primary.family == CandidateFamily::Take) {
+        if (primary.family == PrimaryFamily::Take) {
             EXPECT_EQ(node.family, ActionFamily::Take);
             std::array<std::int8_t, splendor::kTokenColorCount> gain{};
             for (std::size_t color = 0; color < splendor::kTokenColorCount; ++color) {
                 gain[color] = std::max<std::int8_t>(primary.token_delta[color], 0);
             }
             gains[gain].insert(node.intent);
-        } else if (primary.family == CandidateFamily::BuyVisible
-                   || primary.family == CandidateFamily::BuyReserved) {
+        } else if (primary.family == PrimaryFamily::BuyVisible
+                   || primary.family == PrimaryFamily::BuyReserved) {
             EXPECT_EQ(node.family, ActionFamily::Buy);
             cards[*primary.target_card_id].insert(node.intent);
         } else {
@@ -467,7 +424,7 @@ TEST(StagedTurn, ActionTreeGroupsGainsAndPurchasesByIntent) {
     }
     const Decision root = main_decision(overflow);
     const MainOutcome outcome = splendor::apply_main(
-        root, find_main(choices_of(root, catalog), CandidateFamily::ReserveVisible),
+        root, find_main(choices_of(root, catalog), PrimaryFamily::ReserveVisible),
         kMaxGamePlies, catalog);
     const TurnStep step = splendor::resolve_main(
         outcome, outcome.outcome_card_ids.front(), kMaxGamePlies, catalog);
@@ -487,7 +444,7 @@ TEST(StagedTurn, TierCardCountChangesTheDrawNotThePrimary) {
         return choice.primary.source_tier == std::optional<std::uint8_t>{1};
     };
     const TurnChoice full = find_main(
-        choices_of(main_decision(base), catalog), CandidateFamily::ReserveVisible, tier_one);
+        choices_of(main_decision(base), catalog), PrimaryFamily::ReserveVisible, tier_one);
     for (const std::size_t kept : {1U, 0U}) {
         // Tier-one inventory beyond `kept` becomes the opponent's purchases.
         State state = base;
@@ -504,7 +461,7 @@ TEST(StagedTurn, TierCardCountChangesTheDrawNotThePrimary) {
         state.players[1 - state.current_player].bonuses[0] = static_cast<std::uint8_t>(removed);
         const Decision root = main_decision(state);
         const TurnChoice& reserve =
-            find_main(choices_of(root, catalog), CandidateFamily::ReserveVisible, tier_one);
+            find_main(choices_of(root, catalog), PrimaryFamily::ReserveVisible, tier_one);
         EXPECT_EQ(reserve.primary, full.primary);
         const MainOutcome outcome = splendor::apply_main(root, reserve, kMaxGamePlies, catalog);
         EXPECT_EQ(outcome.outcome_card_ids.size(), kept);
@@ -516,7 +473,7 @@ TEST(StagedTurn, TierCardCountChangesTheDrawNotThePrimary) {
         EXPECT_EQ(
             splendor::resolve_main(outcome, draw, kMaxGamePlies, catalog).decision.phase,
             DecisionPhase::Cleanup);
-        EXPECT_GT(expect_atomic_conformance(state, catalog), 0U);
+        EXPECT_GT(expect_complete_turns(state, catalog), 0U);
     }
 }
 
@@ -527,13 +484,12 @@ TEST(StagedTurn, MainExposesTheEligibleNobleSetAtEveryCardinality) {
         const Decision root = main_decision(state);
         const std::vector<TurnChoice> mains = choices_of(root, catalog);
         // Carried-over eligibility: TAKE and RESERVE are not noble-free.
-        for (const CandidateFamily family :
-             {CandidateFamily::Take, CandidateFamily::ReserveVisible}) {
+        for (const PrimaryFamily family :
+             {PrimaryFamily::Take, PrimaryFamily::ReserveVisible}) {
             const TurnChoice& main = find_main(mains, family);
             EXPECT_EQ(static_cast<std::size_t>(std::popcount(main.eligible_nobles)), eligible);
-            EXPECT_FALSE(main.primary.chosen_noble_slot.has_value());
         }
-        EXPECT_GT(expect_atomic_conformance(state, catalog), 0U);
+        EXPECT_GT(expect_complete_turns(state, catalog), 0U);
     }
 }
 
@@ -546,7 +502,7 @@ TEST(StagedTurn, JointCleanupIsTheProductOfReturnsAndNobles) {
         state.bank_tokens[color] = 2;
     }
     const Decision root = main_decision(state);
-    const TurnChoice& reserve = find_main(choices_of(root, catalog), CandidateFamily::ReserveVisible);
+    const TurnChoice& reserve = find_main(choices_of(root, catalog), PrimaryFamily::ReserveVisible);
     const MainOutcome outcome = splendor::apply_main(root, reserve, kMaxGamePlies, catalog);
     EXPECT_EQ(outcome.cleanup_count, splendor::kTokenColorCount * 2);
     const TurnStep step = splendor::resolve_main(
@@ -560,7 +516,7 @@ TEST(StagedTurn, JointCleanupIsTheProductOfReturnsAndNobles) {
     const TurnStep done = splendor::apply_cleanup(step.decision, cleanups.back(), kMaxGamePlies, catalog);
     EXPECT_EQ(done.decision.state.players[state.current_player].noble_count, 1U);
     EXPECT_EQ(splendor::token_count(done.decision.state.players[state.current_player]), 10U);
-    EXPECT_GT(expect_atomic_conformance(state, catalog), 0U);
+    EXPECT_GT(expect_complete_turns(state, catalog), 0U);
 }
 
 // Every gem is held, all three reserves are full and nothing is affordable, so the
@@ -607,7 +563,7 @@ TEST(StagedTurn, ForcedMainIsFollowedByADiscretionaryCleanup) {
     ASSERT_TRUE(splendor::validate_state(state, kMaxGamePlies, catalog));
     const std::vector<TurnChoice> mains = choices_of(main_decision(state), catalog);
     ASSERT_EQ(mains.size(), 1U);
-    EXPECT_EQ(mains.front().primary.family, CandidateFamily::PassForced);
+    EXPECT_EQ(mains.front().primary.family, PrimaryFamily::PassForced);
 
     Decision decision = main_decision(state);
     std::vector<TurnChoice> choices;
@@ -615,7 +571,7 @@ TEST(StagedTurn, ForcedMainIsFollowedByADiscretionaryCleanup) {
     EXPECT_FALSE(splendor::detail::play_forced(decision, choices, seeds, kMaxGamePlies, catalog));
     EXPECT_EQ(decision.phase, DecisionPhase::Cleanup);
     EXPECT_EQ(choices.size(), 2U);
-    EXPECT_GT(expect_atomic_conformance(state, catalog), 0U);
+    EXPECT_GT(expect_complete_turns(state, catalog), 0U);
 }
 
 TEST(StagedTurn, ForeignAndStaleChoicesAreRejected) {
@@ -623,8 +579,8 @@ TEST(StagedTurn, ForeignAndStaleChoicesAreRejected) {
     const State state = ten_token_reserve_state(catalog);
     const Decision root = main_decision(state);
     const std::vector<TurnChoice> mains = choices_of(root, catalog);
-    const TurnChoice& reserve = find_main(mains, CandidateFamily::ReserveVisible);
-    const TurnChoice& take = find_main(mains, CandidateFamily::Take);
+    const TurnChoice& reserve = find_main(mains, PrimaryFamily::ReserveVisible);
+    const TurnChoice& take = find_main(mains, PrimaryFamily::Take);
     const MainOutcome outcome = splendor::apply_main(root, reserve, kMaxGamePlies, catalog);
     const TurnStep step = splendor::resolve_main(
         outcome, outcome.outcome_card_ids.front(), kMaxGamePlies, catalog);
@@ -667,7 +623,7 @@ TEST(StagedTurn, EndingTurnKeepsItsDiscretionaryCleanup) {
     state.players[state.starting_player].prestige = 15;
     ASSERT_TRUE(splendor::validate_state(state, kMaxGamePlies, catalog));
     const Decision root = main_decision(state);
-    const TurnChoice& reserve = find_main(choices_of(root, catalog), CandidateFamily::ReserveVisible);
+    const TurnChoice& reserve = find_main(choices_of(root, catalog), PrimaryFamily::ReserveVisible);
     const MainOutcome outcome = splendor::apply_main(root, reserve, kMaxGamePlies, catalog);
     EXPECT_FALSE(outcome.terminal.has_value());
     EXPECT_EQ(outcome.cleanup_count, 2U);
@@ -680,7 +636,7 @@ TEST(StagedTurn, EndingTurnKeepsItsDiscretionaryCleanup) {
         EXPECT_EQ(ended.terminal->reason, splendor::TerminalReason::TargetScoreEqualTurns);
     }
     // A forced ending turn is adjudicated without drawing its refill.
-    const TurnChoice& take = find_main(choices_of(root, catalog), CandidateFamily::Take);
+    const TurnChoice& take = find_main(choices_of(root, catalog), PrimaryFamily::Take);
     State lone = state;
     lone.noble_ids[1].reset();
     lone.players[1 - lone.current_player].noble_count = 2;
@@ -690,7 +646,7 @@ TEST(StagedTurn, EndingTurnKeepsItsDiscretionaryCleanup) {
         catalog);
     EXPECT_TRUE(forced.terminal.has_value());
     EXPECT_FALSE(forced.awaiting_draw());
-    EXPECT_GT(expect_atomic_conformance(state, catalog), 0U);
+    EXPECT_GT(expect_complete_turns(state, catalog), 0U);
 }
 
 // A closing seat's blind reservation whose only cleanup ends the game still draws its
@@ -712,7 +668,7 @@ TEST(StagedTurn, EndingBlindReservationStillDrawsForItsOwner) {
         const std::uint8_t owner = state.current_player;
         const Decision root = main_decision(state);
         const std::vector<TurnChoice> mains = splendor::decision_choices(root, plies, catalog);
-        const TurnChoice& blind = find_main(mains, CandidateFamily::ReserveBlind);
+        const TurnChoice& blind = find_main(mains, PrimaryFamily::ReserveBlind);
         const MainOutcome outcome = splendor::apply_main(root, blind, plies, catalog);
         ASSERT_TRUE(outcome.terminal.has_value());
         ASSERT_TRUE(outcome.awaiting_draw()) << "the ending turn still owes the private draw";
@@ -733,7 +689,7 @@ TEST(StagedTurn, EndingBlindReservationStillDrawsForItsOwner) {
         EXPECT_FALSE(other.players[owner].reserves[0]->card_id.has_value());
 
         // The ending turn's public refill is not drawn.
-        const TurnChoice& visible = find_main(mains, CandidateFamily::ReserveVisible);
+        const TurnChoice& visible = find_main(mains, PrimaryFamily::ReserveVisible);
         const MainOutcome refill = splendor::apply_main(root, visible, plies, catalog);
         ASSERT_TRUE(refill.terminal.has_value());
         EXPECT_FALSE(refill.awaiting_draw());
@@ -742,7 +698,7 @@ TEST(StagedTurn, EndingBlindReservationStillDrawsForItsOwner) {
 
     // The environment draws it too: the episode's final state is complete.
     Decision decision = main_decision(closing);
-    const TurnChoice& blind = find_main(choices_of(decision, catalog), CandidateFamily::ReserveBlind);
+    const TurnChoice& blind = find_main(choices_of(decision, catalog), PrimaryFamily::ReserveBlind);
     const auto terminal = splendor::detail::play_choice(
         decision, blind, splendor::detail::EpisodeSeeds(5), kMaxGamePlies, catalog);
     ASSERT_TRUE(terminal.has_value());
@@ -751,7 +707,7 @@ TEST(StagedTurn, EndingBlindReservationStillDrawsForItsOwner) {
 }
 
 // Whole games through the staged turn to their end: every decision is valid, every
-// choice is legal, and every turn start agrees with the atomic engine.
+// choice is legal, and every turn of every turn start completes to a valid successor.
 TEST(StagedTurn, WholeGamesPlayToTerminalThroughStagedDecisions) {
     const Catalog catalog = load_catalog();
     std::size_t target_endings = 0;
@@ -763,7 +719,7 @@ TEST(StagedTurn, WholeGamesPlayToTerminalThroughStagedDecisions) {
         for (std::uint32_t step = 0; step < 4 * kMaxGamePlies && !terminal; ++step) {
             ASSERT_TRUE(splendor::validate_decision(decision, kMaxGamePlies, catalog));
             if (decision.phase == DecisionPhase::Main) {
-                EXPECT_GT(expect_atomic_conformance(decision.state, catalog), 0U);
+                EXPECT_GT(expect_complete_turns(decision.state, catalog), 0U);
             } else {
                 ++cleanup_decisions;
             }
@@ -779,13 +735,13 @@ TEST(StagedTurn, WholeGamesPlayToTerminalThroughStagedDecisions) {
             const auto chosen = std::max_element(
                 choices.begin(), choices.end(), [&](const TurnChoice& lhs, const TurnChoice& rhs) {
                     const auto score = [&](const TurnChoice& choice) {
-                        const CandidateDescriptor& row = choice.primary;
+                        const splendor::Primary& row = choice.primary;
                         const bool purchase = choice.phase == DecisionPhase::Main
-                            && (row.family == CandidateFamily::BuyVisible
-                                || row.family == CandidateFamily::BuyReserved);
+                            && (row.family == PrimaryFamily::BuyVisible
+                                || row.family == PrimaryFamily::BuyReserved);
                         if (purchase) return 100 + catalog.card(*row.target_card_id).prestige;
-                        if (row.family == CandidateFamily::ReserveBlind) return 3;
-                        return row.family == CandidateFamily::ReserveVisible ? 2 : 0;
+                        if (row.family == PrimaryFamily::ReserveBlind) return 3;
+                        return row.family == PrimaryFamily::ReserveVisible ? 2 : 0;
                     };
                     return score(lhs) < score(rhs);
                 });
@@ -815,7 +771,7 @@ TEST(StagedTurn, BlindReserveDrawsPrivatelyAndRevealsToItsOwnerOnly) {
     const std::vector<TurnChoice> mains = choices_of(root, catalog);
     for (std::uint8_t tier = 1; tier <= 3; ++tier) {
         const TurnChoice& blind = find_main(
-            mains, CandidateFamily::ReserveBlind,
+            mains, PrimaryFamily::ReserveBlind,
             [&](const TurnChoice& choice) { return choice.primary.source_tier == tier; });
         EXPECT_EQ(blind.primary.token_delta[kGoldIndex], 1);
         EXPECT_FALSE(blind.primary.target_card_id.has_value());
@@ -880,7 +836,7 @@ TEST(StagedTurn, BlindReserveDrawsPrivatelyAndRevealsToItsOwnerOnly) {
     std::erase(world.unknown_card_ids, mine);
     const Decision viewed{splendor::observe(world, owner), DecisionPhase::Main};
     const TurnChoice& blind = find_main(
-        choices_of(viewed, catalog), CandidateFamily::ReserveBlind,
+        choices_of(viewed, catalog), PrimaryFamily::ReserveBlind,
         [&](const TurnChoice& choice) { return choice.primary.source_tier == catalog.card(theirs).tier; });
     const MainOutcome marginal = splendor::apply_main(viewed, blind, kMaxGamePlies, catalog);
     const auto& law = marginal.outcome_card_ids;
@@ -894,7 +850,7 @@ TEST(StagedTurn, BlindReserveDrawsPrivatelyAndRevealsToItsOwnerOnly) {
 // seat that cannot see it: its observation and its legal choices agree.
 TEST(StagedTurn, HiddenWorldSwapLeavesTheOtherSeatsDecisionUnchanged) {
     const Catalog catalog = load_catalog();
-    State left = advanced_state(catalog, 23, 6, CandidateFamily::Take);
+    State left = advanced_state(catalog, 23, 6, PrimaryFamily::Take);
     const std::uint8_t actor = left.current_player;
     const std::uint8_t other = static_cast<std::uint8_t>(1 - actor);
     // Same tier, two identities: the only difference between the worlds.
@@ -947,7 +903,7 @@ TEST(StagedTurn, HiddenWorldSwapLeavesTheOtherSeatsDecisionUnchanged) {
 // view of a decision whose knowledge is not omniscient cannot be revealed.
 TEST(StagedTurn, RevealKeepsTheWorldAndRefusesAProjection) {
     const Catalog catalog = load_catalog();
-    State left = advanced_state(catalog, 23, 6, CandidateFamily::Take);
+    State left = advanced_state(catalog, 23, 6, PrimaryFamily::Take);
     const std::uint8_t actor = left.current_player;
     const std::uint8_t other = static_cast<std::uint8_t>(1 - actor);
     const std::uint16_t first = left.unknown_card_ids[0];

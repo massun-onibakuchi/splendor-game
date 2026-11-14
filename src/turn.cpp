@@ -1,7 +1,6 @@
 #include "splendor/turn.hpp"
 
 #include "splendor/detail/payment.hpp"
-#include "splendor/detail/transition.hpp"
 #include "splendor/detail/turn.hpp"
 
 #include <algorithm>
@@ -43,16 +42,16 @@ struct ChoiceRank {
     auto operator<=>(const ChoiceRank&) const = default;
 };
 
-// The byte order of `candidate_family_name`: no name is a prefix of another, so
+// The byte order of `primary_family_name`: no name is a prefix of another, so
 // families compare by name before any field.
-constexpr std::uint64_t family_rank(const CandidateFamily family) {
+constexpr std::uint64_t family_rank(const PrimaryFamily family) {
     switch (family) {
-        case CandidateFamily::BuyReserved: return 0;
-        case CandidateFamily::BuyVisible: return 1;
-        case CandidateFamily::PassForced: return 2;
-        case CandidateFamily::ReserveBlind: return 3;
-        case CandidateFamily::ReserveVisible: return 4;
-        case CandidateFamily::Take: return 5;
+        case PrimaryFamily::BuyReserved: return 0;
+        case PrimaryFamily::BuyVisible: return 1;
+        case PrimaryFamily::PassForced: return 2;
+        case PrimaryFamily::ReserveBlind: return 3;
+        case PrimaryFamily::ReserveVisible: return 4;
+        case PrimaryFamily::Take: return 5;
     }
     return 6;
 }
@@ -78,7 +77,7 @@ std::uint64_t final_decimal_rank(const unsigned value) {
 // `main|<family>|d=..|p=..|z=<zone>|t=|s=|o=|r=|c=`: the family, the six signed deltas,
 // the six payments, then the optional fields the family carries (zone and presence
 // are the family's).
-ChoiceRank main_rank(const CandidateDescriptor& primary) {
+ChoiceRank main_rank(const Primary& primary) {
     ChoiceRank rank;
     rank.high = family_rank(primary.family);
     for (const std::int8_t delta : primary.token_delta) {
@@ -138,7 +137,7 @@ private:
 // expanded decision, so each set reuses these buffers instead of allocating its own.
 struct ChoiceScratch {
     ChoiceOrder order;
-    std::vector<CandidateDescriptor> primaries;
+    std::vector<Primary> primaries;
     // The take family's normal-form net deltas.
     std::vector<detail::TokenDelta> deltas;
     std::vector<TokenCounts> discards;
@@ -193,18 +192,18 @@ public:
         }
     }
 
-    SlotMask of(const CandidateDescriptor& primary) const {
+    SlotMask of(const Primary& primary) const {
         // Exhaustive on purpose: a new primary family must state whether it changes
         // the bonuses that noble eligibility reads.
         switch (primary.family) {
-            case CandidateFamily::BuyVisible:
-            case CandidateFamily::BuyReserved:
+            case PrimaryFamily::BuyVisible:
+            case PrimaryFamily::BuyReserved:
                 return sets_[static_cast<std::size_t>(
                     catalog_.card(*primary.target_card_id).bonus)];
-            case CandidateFamily::Take:
-            case CandidateFamily::ReserveVisible:
-            case CandidateFamily::ReserveBlind:
-            case CandidateFamily::PassForced:
+            case PrimaryFamily::Take:
+            case PrimaryFamily::ReserveVisible:
+            case PrimaryFamily::ReserveBlind:
+            case PrimaryFamily::PassForced:
                 break;
         }
         return sets_[kGemColorCount];
@@ -219,7 +218,7 @@ private:
 void assign_main_choice(
     TurnChoice& choice,
     const EligibleNobles& eligible,
-    const CandidateDescriptor& primary) {
+    const Primary& primary) {
     choice.phase = DecisionPhase::Main;
     choice.primary = primary;
     choice.eligible_nobles = eligible.of(primary);
@@ -235,11 +234,11 @@ void main_choices(
     std::vector<TurnChoice>& choices) {
     const PlayerState& player = state.players[state.current_player];
     ChoiceScratch& scratch = ChoiceScratch::local();
-    std::vector<CandidateDescriptor>& primaries = scratch.primaries;
+    std::vector<Primary>& primaries = scratch.primaries;
     ChoiceOrder& order = scratch.order;
     primaries.clear();
     order.clear();
-    const auto emit = [&](CandidateDescriptor primary) {
+    const auto emit = [&](Primary primary) {
         order.add(main_rank(primary));
         primaries.push_back(std::move(primary));
     };
@@ -250,8 +249,8 @@ void main_choices(
     std::vector<detail::TokenDelta>& deltas = scratch.deltas;
     detail::normal_form_takes(state, deltas);
     for (const detail::TokenDelta& delta : deltas) {
-        CandidateDescriptor primary;
-        primary.family = CandidateFamily::Take;
+        Primary primary;
+        primary.family = PrimaryFamily::Take;
         primary.token_delta = delta;
         emit(std::move(primary));
     }
@@ -263,9 +262,8 @@ void main_choices(
         const bool gold_available = state.bank_tokens[kGoldIndex] != 0;
         for (std::size_t index = 0; index < state.market_card_ids.size(); ++index) {
             if (!state.market_card_ids[index]) continue;
-            CandidateDescriptor primary;
-            primary.family = CandidateFamily::ReserveVisible;
-            primary.source_zone = SourceZone::Market;
+            Primary primary;
+            primary.family = PrimaryFamily::ReserveVisible;
             primary.source_tier = static_cast<std::uint8_t>(index / kMarketSlotsPerTier + 1);
             primary.source_slot = static_cast<std::uint8_t>(index % kMarketSlotsPerTier);
             primary.target_card_id = *state.market_card_ids[index];
@@ -275,9 +273,8 @@ void main_choices(
         const TierCounts counts = tier_counts(state, catalog);
         for (std::uint8_t tier = 1; tier <= kTierCount; ++tier) {
             if (counts.deck[tier - 1] == 0) continue;
-            CandidateDescriptor primary;
-            primary.family = CandidateFamily::ReserveBlind;
-            primary.source_zone = SourceZone::Deck;
+            Primary primary;
+            primary.family = PrimaryFamily::ReserveBlind;
             primary.source_tier = tier;
             if (gold_available) primary.token_delta[kGoldIndex] = 1;
             emit(std::move(primary));
@@ -287,17 +284,15 @@ void main_choices(
     // A purchase commits its complete payment before any refill.
     std::vector<std::array<std::uint8_t, kTokenColorCount>>& payments = scratch.payments;
     const auto emit_buys = [&](
-        const CandidateFamily family,
-        const SourceZone zone,
+        const PrimaryFamily family,
         const std::uint16_t card_id,
         const std::optional<std::uint8_t> tier,
         const std::optional<std::uint8_t> market_slot,
         const std::optional<std::uint8_t> reserve_slot) {
         detail::payment_variants(player, catalog.card(card_id), payments);
         for (const auto& payment : payments) {
-            CandidateDescriptor primary;
+            Primary primary;
             primary.family = family;
-            primary.source_zone = zone;
             primary.source_tier = tier;
             primary.source_slot = market_slot;
             primary.target_card_id = card_id;
@@ -312,7 +307,7 @@ void main_choices(
     for (std::size_t index = 0; index < state.market_card_ids.size(); ++index) {
         if (!state.market_card_ids[index]) continue;
         emit_buys(
-            CandidateFamily::BuyVisible, SourceZone::Market, *state.market_card_ids[index],
+            PrimaryFamily::BuyVisible, *state.market_card_ids[index],
             static_cast<std::uint8_t>(index / kMarketSlotsPerTier + 1),
             static_cast<std::uint8_t>(index % kMarketSlotsPerTier), std::nullopt);
     }
@@ -322,13 +317,13 @@ void main_choices(
         if (!reserve->card_id) throw std::logic_error("the actor's reserve carries no identity");
         const std::uint16_t card_id = *reserve->card_id;
         emit_buys(
-            CandidateFamily::BuyReserved, SourceZone::SelfReserve, card_id,
+            PrimaryFamily::BuyReserved, card_id,
             reserve->tier, std::nullopt, static_cast<std::uint8_t>(slot));
     }
 
     if (primaries.empty()) {
-        CandidateDescriptor pass;
-        pass.family = CandidateFamily::PassForced;
+        Primary pass;
+        pass.family = PrimaryFamily::PassForced;
         emit(std::move(pass));
     }
     const std::vector<ChoiceOrder::Entry>& sorted = order.distinct();
@@ -358,8 +353,8 @@ std::optional<TerminalFacts> finish_cleanup(
     for (std::size_t color = 0; color < kTokenColorCount; ++color) {
         delta[color] = -static_cast<std::int8_t>(returned[color]);
     }
-    apply_token_delta(state, seat, delta);
-    claim_noble(state, catalog, seat, noble_slot);
+    detail::apply_token_delta(state, seat, delta);
+    detail::claim_noble(state, catalog, seat, noble_slot);
     return detail::finish_turn_state(state, max_game_plies);
 }
 
@@ -585,43 +580,6 @@ const TurnChoice& find_choice(
     return *found;
 }
 
-LeafPath leaf_path(const State& root, const CandidateDescriptor& leaf) {
-    CandidateDescriptor primary = leaf;
-    primary.chosen_noble_slot.reset();
-    std::array<std::uint8_t, kTokenColorCount> returned{};
-    // Exhaustive on purpose: a new family must state its own split here rather than
-    // inherit "no return".
-    switch (leaf.family) {
-        case CandidateFamily::ReserveVisible: {
-            // A visible reserve takes the available gold before any return, so the
-            // leaf's net delta splits back into that take and its return.
-            std::array<std::int8_t, kTokenColorCount> take{};
-            if (root.bank_tokens[kGoldIndex] != 0) take[kGoldIndex] = 1;
-            for (std::size_t color = 0; color < kTokenColorCount; ++color) {
-                const int discard = take[color] - leaf.token_delta[color];
-                if (discard < 0) throw std::logic_error("reserve leaf delta exceeds its take");
-                returned[color] = static_cast<std::uint8_t>(discard);
-            }
-            primary.token_delta = take;
-            break;
-        }
-        case CandidateFamily::ReserveBlind:
-            // A leaf fixes its return before the draw; a blind reservation's owner
-            // chooses its return after seeing the card, so no leaf blind reserves.
-            throw std::invalid_argument("a blind reservation has no complete effective leaf");
-        case CandidateFamily::Take:
-        case CandidateFamily::PassForced:
-        case CandidateFamily::BuyVisible:
-        case CandidateFamily::BuyReserved:
-            break;
-    }
-    LeafPath path;
-    path.main_key = kMainKeyPrefix;
-    detail::append_action_key(path.main_key, primary);
-    append_cleanup_key(path.cleanup_key, returned, leaf.chosen_noble_slot);
-    return path;
-}
-
 namespace detail {
 
 namespace {
@@ -630,7 +588,7 @@ void fill_cleanup_choices(
     const State& state,
     const Catalog& catalog,
     std::vector<TurnChoice>& choices) {
-    static const CandidateDescriptor kNoPrimary{};
+    static const Primary kNoPrimary{};
     const PlayerState& player = state.players[state.current_player];
     ChoiceScratch& scratch = ChoiceScratch::local();
     std::vector<TokenCounts>& returns = scratch.discards;
@@ -703,7 +661,7 @@ void append_choice_key(std::string& output, const TurnChoice& choice) {
     switch (choice.phase) {
         case DecisionPhase::Main:
             output += kMainKeyPrefix;
-            append_action_key(output, choice.primary);
+            append_primary_key(output, choice.primary);
             return;
         case DecisionPhase::Cleanup:
             append_cleanup_key(output, choice.returned, choice.noble_slot);
@@ -809,122 +767,6 @@ void normal_form_takes(const State& state, std::vector<TokenDelta>& deltas) {
             ++gain[colors[digit]];
         }
     }
-}
-
-std::optional<OwedDraw> apply_primary_effect(
-    State& state,
-    const Catalog& catalog,
-    const CandidateDescriptor& primary) {
-    const std::uint8_t seat = state.current_player;
-    apply_token_delta(state, seat, primary.token_delta);
-    PlayerState& player = state.players[seat];
-    std::optional<OwedDraw> owed;
-    switch (primary.family) {
-        case CandidateFamily::Take:
-        case CandidateFamily::PassForced:
-            break;
-        case CandidateFamily::ReserveVisible: {
-            const std::size_t index = market_index(*primary.source_tier, *primary.source_slot);
-            if (state.market_card_ids[index] != primary.target_card_id) {
-                throw std::logic_error("reserve target changed");
-            }
-            const auto destination = first_empty_reserve(player);
-            if (!destination) throw std::logic_error("reserve capacity exhausted");
-            player.reserves[*destination] = Reserve{*primary.source_tier, primary.target_card_id, false};
-            state.market_card_ids[index].reset();
-            if (tier_counts(state, catalog).deck[*primary.source_tier - 1] != 0) {
-                owed = OwedDraw{DrawKind::Refill, *primary.source_tier, *primary.source_slot, seat};
-            }
-            break;
-        }
-        case CandidateFamily::ReserveBlind: {
-            // The deck must still hold a card after accounting for every concealed
-            // reservation the state cannot name; the new reservation is one of them
-            // until its draw resolves.
-            if (tier_counts(state, catalog).deck[*primary.source_tier - 1] == 0) {
-                throw std::logic_error("blind reserve of an empty deck");
-            }
-            const auto destination = first_empty_reserve(player);
-            if (!destination) throw std::logic_error("reserve capacity exhausted");
-            player.reserves[*destination] = Reserve{*primary.source_tier, std::nullopt, true};
-            owed = OwedDraw{DrawKind::BlindReserve, *primary.source_tier, *destination, seat};
-            break;
-        }
-        case CandidateFamily::BuyVisible:
-        case CandidateFamily::BuyReserved: {
-            apply_payment(state, seat, primary.payment);
-            if (primary.family == CandidateFamily::BuyVisible) {
-                const std::size_t index =
-                    market_index(*primary.source_tier, *primary.source_slot);
-                if (state.market_card_ids[index] != primary.target_card_id) {
-                    throw std::logic_error("visible buy target changed");
-                }
-                state.market_card_ids[index].reset();
-                if (tier_counts(state, catalog).deck[*primary.source_tier - 1] != 0) {
-                    owed = OwedDraw{DrawKind::Refill, *primary.source_tier, *primary.source_slot, seat};
-                }
-            } else {
-                if (primary.reserve_owner != seat
-                    || !player.reserves[*primary.reserve_slot]
-                    || player.reserves[*primary.reserve_slot]->card_id
-                        != primary.target_card_id) {
-                    throw std::logic_error("reserved buy target changed");
-                }
-                player.reserves[*primary.reserve_slot].reset();
-            }
-            const Card& card = catalog.card(*primary.target_card_id);
-            ++player.bonuses[static_cast<std::size_t>(card.bonus)];
-            player.prestige += card.prestige;
-            ++player.purchased_cards;
-            break;
-        }
-    }
-    return owed;
-}
-
-void place_draw(
-    State& state,
-    const Catalog& catalog,
-    const OwedDraw& owed,
-    const std::uint16_t card_id) {
-    const auto found = std::lower_bound(
-        state.unknown_card_ids.begin(), state.unknown_card_ids.end(), card_id);
-    if (found == state.unknown_card_ids.end() || *found != card_id
-        || catalog.card(card_id).tier != owed.tier) {
-        throw std::invalid_argument("card is not a draw outcome of the owed tier");
-    }
-    switch (owed.kind) {
-        case DrawKind::Refill: {
-            std::optional<std::uint16_t>& slot =
-                state.market_card_ids[market_index(owed.tier, owed.slot)];
-            if (slot) throw std::logic_error("owed market slot is already filled");
-            slot = card_id;
-            break;
-        }
-        case DrawKind::BlindReserve: {
-            std::optional<Reserve>& reserve = state.players[owed.owner].reserves[owed.slot];
-            if (!reserve || reserve->card_id || !reserve->concealed || reserve->tier != owed.tier) {
-                throw std::logic_error("owed blind reservation is not awaiting its draw");
-            }
-            reserve->card_id = card_id;
-            break;
-        }
-    }
-    state.unknown_card_ids.erase(found);
-}
-
-std::optional<TerminalFacts> finish_turn_state(
-    State& state,
-    const std::uint32_t max_game_plies) {
-    const std::uint8_t seat = state.current_player;
-    if (!state.endgame_triggered && state.players[seat].prestige >= kTargetPrestige) {
-        state.endgame_triggered = true;
-        state.endgame_trigger_player = seat;
-    }
-    ++state.game_ply;
-    state.current_player =
-        static_cast<std::uint8_t>((state.starting_player + state.game_ply) % state.player_count);
-    return terminal_facts(state, max_game_plies);
 }
 
 ValidationResult validate_resolved_draws(const State& state, const Catalog& catalog) {

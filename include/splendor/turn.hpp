@@ -1,7 +1,8 @@
 #pragma once
 
-#include "splendor/candidate.hpp"
-#include "splendor/transition.hpp"
+#include "splendor/catalog.hpp"
+#include "splendor/primary.hpp"
+#include "splendor/terminal.hpp"
 
 #include <array>
 #include <cstdint>
@@ -117,11 +118,8 @@ PlayerView reveal(Decision&& decision);
 // formatted only where a key is published, so generating a choice set formats none.
 struct TurnChoice {
     DecisionPhase phase{};
-    // MAIN: the primary effect. A take carries its gain/give normal form's net delta, a
-    // visible reserve exactly its mandatory gold, a purchase its complete
-    // payment. Never a later return or noble. Its own `action_key` stays empty:
-    // `choice_key` names the choice.
-    CandidateDescriptor primary;
+    // MAIN: the primary effect. Never a later return or noble.
+    Primary primary;
     // MAIN: the visible noble slots eligible once the primary's permanent bonus applies,
     // carried-over eligibility included. A set of possible or forced consequences, never
     // a selection.
@@ -135,7 +133,7 @@ struct TurnChoice {
 // A MAIN choice that reserves a tier's top card unseen.
 inline bool is_blind_reservation(const TurnChoice& choice) noexcept {
     return choice.phase == DecisionPhase::Main
-        && choice.primary.family == CandidateFamily::ReserveBlind;
+        && choice.primary.family == PrimaryFamily::ReserveBlind;
 }
 
 // `main|<primary effect key>` or `cleanup|d=<six returned counts>|n=<slot or ->`.
@@ -218,17 +216,5 @@ TurnStep apply_cleanup(
 const TurnChoice& find_choice(
     const std::vector<TurnChoice>& choices,
     std::string_view action_key);
-
-// Atomic adapter: the MAIN and CLEANUP keys a complete effective leaf of the turn
-// start `root` precommits. The leaf's cleanup is fixed before the draw, so a policy
-// over leaves is a restricted, information-poorer staged policy; no leaf blind
-// reserves, since its return would be fixed before a draw its owner is entitled to see.
-struct LeafPath {
-    std::string main_key;
-    std::string cleanup_key;
-    bool operator==(const LeafPath&) const = default;
-};
-
-LeafPath leaf_path(const State& root, const CandidateDescriptor& leaf);
 
 }  // namespace splendor

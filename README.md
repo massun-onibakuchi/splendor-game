@@ -12,7 +12,7 @@ Contracts live in [docs/specs](docs/specs/spec.md).
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
-./build/splendor_game_benchmark 3000      # uniform playouts: staged, recorded, atomic
+./build/splendor_game_benchmark 3000      # uniform playouts: staged, recorded
 
 uv sync
 uv run pytest

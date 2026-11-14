@@ -1,14 +1,8 @@
 #pragma once
 
-#include "splendor/catalog.hpp"
-#include "splendor/state.hpp"
-#include "splendor/transition.hpp"
 #include "splendor/turn.hpp"
 
 #include <array>
-#include <cstdint>
-#include <optional>
-#include <string>
 #include <vector>
 
 namespace splendor::detail {
@@ -38,17 +32,11 @@ private:
     std::array<std::uint64_t, kMaxPlayers> policy_{};
 };
 
-// Atomic adapter: plays the acting seat's `selected` complete effective leaf, generated
-// for exactly `state`, as decision `decision_ordinal` and counts it. Returns the terminal
-// facts, or else advances `state` through the turn's chance outcome drawn from
-// `draw_seed`, the environment's seed for the turn.
-std::optional<TerminalFacts> play_decision(
-    State& state,
-    std::uint32_t& decision_ordinal,
-    const CandidateDescriptor& selected,
-    std::uint64_t draw_seed,
-    std::uint32_t max_game_plies,
-    const Catalog& catalog);
+// The environment's draw law: the card an owed draw places, uniform over `card_ids`
+// (`MainOutcome::outcome_card_ids`, ascending) under the turn's draw seed.
+std::uint16_t select_episode_chance_card(
+    const std::vector<std::uint16_t>& card_ids,
+    std::uint64_t draw_seed);
 
 // Plays `selected`, one of `decision`'s legal choices, and advances `decision` to the
 // next decision: after a MAIN choice the owed draw -- public refill or private blind
@@ -69,17 +57,5 @@ std::optional<TerminalFacts> play_forced(
     const EpisodeSeeds& seeds,
     std::uint32_t max_game_plies,
     const Catalog& catalog);
-
-// Atomic adapter: plays a complete effective leaf of the turn start `decision` as its
-// precommitted MAIN and CLEANUP keys. The cleanup is fixed before the refill. Appends to
-// `exposed` the key of each of those decisions that had more than one legal choice: the
-// keys that replay the turn in a `TurnEpisode`, which plays forced choices itself.
-std::optional<TerminalFacts> play_leaf(
-    Decision& decision,
-    const CandidateDescriptor& leaf,
-    const EpisodeSeeds& seeds,
-    std::uint32_t max_game_plies,
-    const Catalog& catalog,
-    std::vector<std::string>& exposed);
 
 }  // namespace splendor::detail

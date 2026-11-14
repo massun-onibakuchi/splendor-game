@@ -12,22 +12,22 @@ namespace {
 constexpr std::size_t kGoldIndex = static_cast<std::size_t>(Color::Gold);
 
 // The family of a MAIN choice's primary.
-ActionFamily main_family(const CandidateFamily family) {
+ActionFamily main_family(const PrimaryFamily family) {
     switch (family) {
-        case CandidateFamily::Take: return ActionFamily::Take;
-        case CandidateFamily::ReserveVisible:
-        case CandidateFamily::ReserveBlind: return ActionFamily::Reserve;
-        case CandidateFamily::BuyVisible:
-        case CandidateFamily::BuyReserved: return ActionFamily::Buy;
-        case CandidateFamily::PassForced: return ActionFamily::Pass;
+        case PrimaryFamily::Take: return ActionFamily::Take;
+        case PrimaryFamily::ReserveVisible:
+        case PrimaryFamily::ReserveBlind: return ActionFamily::Reserve;
+        case PrimaryFamily::BuyVisible:
+        case PrimaryFamily::BuyReserved: return ActionFamily::Buy;
+        case PrimaryFamily::PassForced: return ActionFamily::Pass;
     }
-    throw std::logic_error("unknown candidate family");
+    throw std::logic_error("unknown primary family");
 }
 
 // A take's gain: the positive part of its net delta, which the normal form makes the gain
 // itself (its return lies in other colours). Gold is never gained, so each gem colour's
 // count of 0, 1 or 2 is one base-3 digit.
-std::uint64_t gain_code(const CandidateDescriptor& primary) {
+std::uint64_t gain_code(const Primary& primary) {
     std::uint64_t code = 0;
     for (std::size_t color = kGoldIndex; color-- > 0;) {
         code = 3 * code + static_cast<std::uint64_t>(std::max<int>(0, primary.token_delta[color]));
@@ -40,16 +40,16 @@ std::uint64_t gain_code(const CandidateDescriptor& primary) {
 // family and card (a card sits in one market slot or one reserve slot).
 std::optional<std::uint64_t> shared_intent(const TurnChoice& choice) {
     if (choice.phase != DecisionPhase::Main) return std::nullopt;
-    const CandidateDescriptor& primary = choice.primary;
+    const Primary& primary = choice.primary;
     switch (primary.family) {
-        case CandidateFamily::Take: return gain_code(primary);
-        case CandidateFamily::BuyVisible: return (std::uint64_t{1} << 32) | *primary.target_card_id;
-        case CandidateFamily::BuyReserved: return (std::uint64_t{2} << 32) | *primary.target_card_id;
-        case CandidateFamily::ReserveVisible:
-        case CandidateFamily::ReserveBlind:
-        case CandidateFamily::PassForced: return std::nullopt;
+        case PrimaryFamily::Take: return gain_code(primary);
+        case PrimaryFamily::BuyVisible: return (std::uint64_t{1} << 32) | *primary.target_card_id;
+        case PrimaryFamily::BuyReserved: return (std::uint64_t{2} << 32) | *primary.target_card_id;
+        case PrimaryFamily::ReserveVisible:
+        case PrimaryFamily::ReserveBlind:
+        case PrimaryFamily::PassForced: return std::nullopt;
     }
-    throw std::logic_error("unknown candidate family");
+    throw std::logic_error("unknown primary family");
 }
 
 bool all_zero(const std::array<std::int8_t, kTokenColorCount>& delta) {

@@ -25,18 +25,18 @@ include(GNUInstallDirs)
 
 add_library(splendor_game
   src/action_tree.cpp
-  src/candidate.cpp
-  src/candidate_generation.cpp
   src/catalog.cpp
   src/choice_columns.cpp
   src/clock.cpp
+  src/effects.cpp
   src/episode.cpp
   src/game_episode.cpp
   src/match.cpp
+  src/primary.cpp
   src/replay.cpp
   src/seed.cpp
   src/state.cpp
-  src/transition.cpp
+  src/terminal.cpp
   src/turn.cpp)
 add_library(splendor::game ALIAS splendor_game)
 set_target_properties(splendor_game PROPERTIES EXPORT_NAME game)
@@ -107,9 +107,9 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 add_executable(splendor_game_tests
-  tests/candidate_transition_test.cpp
   tests/catalog_seed_state_test.cpp
   tests/clock_test.cpp
+  tests/main_choice_test.cpp
   tests/match_host_test.cpp
   tests/match_test.cpp
   tests/play_json_test.cpp

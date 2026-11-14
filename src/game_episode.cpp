@@ -1,6 +1,5 @@
 #include "splendor/episode.hpp"
 
-#include "splendor/detail/transition.hpp"
 #include "splendor/detail/turn.hpp"
 
 #include <atomic>
@@ -53,9 +52,9 @@ void TurnEpisode::apply(const TurnChoice& choice, const bool forced) {
         // reservation included: the final world names every card.
         std::optional<std::uint16_t> card;
         if (outcome.draw) {
-            card = select_episode_chance_card(outcome.outcome_card_ids, seeds_.draw(before));
+            card = detail::select_episode_chance_card(outcome.outcome_card_ids, seeds_.draw(before));
             if (outcome.draw->kind == DrawKind::Refill) {
-                step.refill_slot = static_cast<std::uint8_t>(market_index(outcome.draw->tier, outcome.draw->slot));
+                step.refill_slot = static_cast<std::uint8_t>(detail::market_index(outcome.draw->tier, outcome.draw->slot));
                 step.refill_card = card;
             } else {
                 step.blind_draw_tier = outcome.draw->tier;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "splendor/clock.hpp"
-#include "splendor/transition.hpp"
+#include "splendor/terminal.hpp"
 
 #include <string_view>
 

@@ -1,10 +1,10 @@
 #pragma once
 
-#include "splendor/candidate.hpp"
+#include "splendor/state.hpp"
 
+#include <array>
 #include <cstdint>
 #include <optional>
-#include <vector>
 
 namespace splendor {
 
@@ -25,34 +25,8 @@ struct TerminalFacts {
 // The one seat that won outright; absent for a shared win or a game without a winner.
 std::optional<std::uint8_t> sole_winner(SeatMask winners) noexcept;
 
-struct TransitionResult {
-    State state;
-    std::optional<std::uint8_t> refill_tier;
-    std::optional<std::uint8_t> refill_market_slot;
-    std::optional<TerminalFacts> terminal;
-
-    bool awaiting_refill() const noexcept {
-        return refill_tier.has_value();
-    }
-};
-
-TransitionResult apply_candidate(
-    const State& state,
-    std::uint32_t max_game_plies,
-    const Catalog& catalog,
-    const CandidateDescriptor& candidate);
-
-std::vector<State> chance_outcomes(
-    const TransitionResult& deferred,
-    std::uint32_t max_game_plies,
-    const Catalog& catalog);
-
-State select_episode_outcome(
-    const TransitionResult& transition,
-    std::uint32_t max_game_plies,
-    const Catalog& catalog,
-    std::uint64_t decision_seed);
-
+// The terminal facts of a stable turn start, if the game is over there: equal turns after
+// the target was reached, which takes precedence over a simultaneous ply cap.
 std::optional<TerminalFacts> terminal_facts(
     const State& state,
     std::uint32_t max_game_plies);

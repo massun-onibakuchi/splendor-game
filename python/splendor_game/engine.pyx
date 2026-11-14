@@ -12,7 +12,7 @@ from pathlib import Path
 cdef extern from *:
     """
     #include "splendor/action_tree.hpp"
-    #include "splendor/candidate.hpp"
+    #include "splendor/primary.hpp"
     #include "splendor/contracts.hpp"
     #include "splendor/catalog.hpp"
     #include "splendor/seed.hpp"
@@ -45,8 +45,8 @@ cdef extern from *:
     }
     static std::vector<std::string> splendor_primary_family_names() {
         std::vector<std::string> names;
-        for (int code = 0; code <= static_cast<int>(splendor::CandidateFamily::PassForced); ++code) {
-            names.emplace_back(splendor::candidate_family_name(static_cast<splendor::CandidateFamily>(code)));
+        for (int code = 0; code <= static_cast<int>(splendor::PrimaryFamily::PassForced); ++code) {
+            names.emplace_back(splendor::primary_family_name(static_cast<splendor::PrimaryFamily>(code)));
         }
         return names;
     }

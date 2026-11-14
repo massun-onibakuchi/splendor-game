@@ -1,6 +1,6 @@
 ---
 title: Staged Actions
-description: Turn phases, legal choices, chance, keys, and the atomic adapter.
+description: Turn phases, primary effects, legal choices, chance and keys.
 date: 2026-11-14
 status: active
 tags:
@@ -29,8 +29,8 @@ decks and noble order at every seat count. The game fixes:
   fewer than three are available, never fewer), or two of one color from a pile of at
   least four. Held tokens never block a take: the excess over ten is returned.
 - A visible reserve needs an occupied slot; a blind reserve needs a tier whose deck
-  holds a card; both need fewer than three reserves. Gold acquisition and effective
-  equivalence follow [action canonicalization](action-canonicalization.md).
+  holds a card; both need fewer than three reserves and take one gold when the bank
+  holds gold.
 - A blind reservation draws the top card of the named tier's deck into the actor's
   reserve face down: its identity is the owner's alone until it is bought.
 - All legal payments after bonuses are choices; gold may pay for any color, even one the
@@ -73,7 +73,7 @@ MAIN -> primary effect -> owed draw, when any -> joint CLEANUP -> turn end
 - The null move is the empty gain: legal exactly when the actor holds ten tokens and some
   take is legal.
 - A MAIN choice's meaning depends only on its family: never on the draw, tier size,
-  cleanup count, or whether the turn ends the game. No MAIN choice is a complete leaf.
+  cleanup count, or whether the turn ends the game. No MAIN choice fixes its turn's cleanup.
 - A MAIN choice selects no noble. It exposes the nobles eligible once its primary
   applies, carried-over eligibility included, at any cardinality.
 - A vacated market slot is refilled before CLEANUP while its tier holds cards; the
@@ -100,6 +100,33 @@ MAIN -> primary effect -> owed draw, when any -> joint CLEANUP -> turn end
   own operation. Full validation happens where outside input enters: supplied starts,
   `decision_choices` and consumers' decoded inputs.
 
+## Primary effects
+
+[primary.hpp](../../include/splendor/primary.hpp) owns `Primary`, the effect a MAIN
+choice commits. It carries exactly its family's fields:
+
+| Family | Delta / payment | Fields |
+| --- | --- | --- |
+| `take` | Gain/give net delta, zero only for the null move / zero | none |
+| `reserve_visible` | One gold when the bank holds gold, else zero / zero | Tier, market slot, card |
+| `reserve_blind` | One gold when the bank holds gold, else zero / zero | Tier |
+| `buy_visible` | Zero / a legal payment | Tier, market slot, card |
+| `buy_reserved` | Zero / a legal payment | Tier, the acting seat as owner, reserve slot, card |
+| `pass_forced` | Zero / zero | none |
+
+A reservation takes its gold even when cleanup returns a token. Choices that differ in
+payment, card, location or tier are distinct. The primary key is
+
+```text
+family "|d=" i8x6 "|p=" u8x6 "|z=" zone
+       ["|t=" tier] ["|s=" slot] ["|o=" owner] ["|r=" reserve_slot] ["|c=" card]
+```
+
+`d` and `p` are six comma-separated decimals; an optional field appears exactly when
+the family carries it, in the displayed order. The zone is the family's: `none` (take,
+pass), `market` (visible reserve or buy), `deck` (blind reserve), `self_reserve`
+(reserved buy). [main_choice_test.cpp](../../tests/main_choice_test.cpp) pins the bytes.
+
 ## Action tree
 
 [action_tree.hpp](../../include/splendor/action_tree.hpp) owns it. A decision
@@ -124,7 +151,7 @@ never adds a decision:
 
 | Phase | Key |
 | --- | --- |
-| MAIN | `main\|<effective action key of the primary>` |
+| MAIN | `main\|<primary key>` ([primary effects](#primary-effects)) |
 | CLEANUP | `cleanup\|d=w,b,g,r,k,gold\|n=<noble slot or ->` |
 
 Choices are ordered by ascending key. A key from another phase or decision is rejected
@@ -146,7 +173,7 @@ Changing the grammar must preserve this equivalence or revise the ordering contr
   drawn into the final world, which names every card (`StagedTurn.EndingBlindReservationStillDrawsForItsOwner`).
 - The environment draws with the episode's own seed domain
   ([seed law](../../include/splendor/seed.hpp), [episode seeds](../../include/splendor/detail/episode.hpp)), never with an agent's
-  decision seed; a leaf played as a staged path draws the same card.
+  decision seed.
 - MAIN observations, choices and keys depend only on the turn start as the actor
   knows it; no draw preview exists at MAIN. `MainOutcome` enumerates draw outcomes for
   consumers that evaluate them.
@@ -154,15 +181,6 @@ Changing the grammar must preserve this equivalence or revise the ordering contr
   reservation, with the correspondingly depleted unknown set.
 - Every decision is presented to its actor as the actor's view
   ([observations](observations.md)); perspective changes only at the actor transition.
-
-## Atomic adapter
-
-An [effective leaf](action-canonicalization.md) precommits a MAIN primary and CLEANUP
-before any draw. Leaves biject with non-blind (MAIN, CLEANUP) key pairs and reach the
-atomic successor under every draw, except that an ending atomic turn leaves its refill
-undrawn. Blind reservations have no leaf. Players of
-complete leaves use this adapter; they do not choose again at CLEANUP.
-Consumers that project leaf targets or evaluate staged choices own those projections.
 
 ## Seat counts
 

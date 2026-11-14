@@ -71,12 +71,22 @@ class GameBuildExt(build_ext):
         )
 
 
-setup(
-    ext_modules=cythonize([Extension(
-        "splendor_game.engine", ["python/splendor_game/engine.pyx"],
-        libraries=["splendor_play", "splendor_game"],
-        runtime_library_dirs=["@loader_path/_core/lib" if sys.platform == "darwin" else "$ORIGIN/_core/lib"],
+def _extension(name: str, source: str, libraries: list[str], core: str) -> Extension:
+    return Extension(
+        name, [source], libraries=libraries,
+        runtime_library_dirs=[f"@loader_path/{core}" if sys.platform == "darwin" else f"$ORIGIN/{core}"],
         language="c++", extra_compile_args=["-std=c++20", "-O2", "-Wall", "-Wextra", "-Wpedantic"],
-    )], compiler_directives={"language_level": 3}, include_path=[str(ROOT / "python")]),
+    )
+
+
+setup(
+    ext_modules=cythonize([
+        # Its board and result renderings are the play library's.
+        _extension("splendor_game.engine", "python/splendor_game/engine.pyx",
+                   ["splendor_play", "splendor_game"], "_core/lib"),
+        # The match host: the play library over the same shared game library.
+        _extension("splendor_play._native", "python/splendor_play/_native.pyx",
+                   ["splendor_play", "splendor_game"], "../splendor_game/_core/lib"),
+    ], compiler_directives={"language_level": 3}, include_path=[str(ROOT / "python")]),
     cmdclass={"build_ext": GameBuildExt},
 )

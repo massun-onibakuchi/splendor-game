@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "splendor-game"
 version = "0.1.0"
-description = "Native Splendor game engine, match clocks and a practical-play host"
+description = "Native Splendor game engine, match clocks and a seat-agnostic practical-play host"
 requires-python = ">=3.10"
 dependencies = []
 

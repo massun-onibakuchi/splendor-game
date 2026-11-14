@@ -10,3 +10,4 @@ dist/
 python/splendor_game/engine.cpp
 python/splendor_game/_core/
 .DS_Store
+python/splendor_play/_native.cpp

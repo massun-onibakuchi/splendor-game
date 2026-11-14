@@ -1,7 +1,8 @@
 # AGENTS.md
 
 Native Splendor engine (`include/`, `src/`, C++20), its Cython binding
-(`python/splendor_game`) and the practical-play host (`python/splendor_play`).
+(`python/splendor_game`) and the native practical-play host (`include/splendor/play`,
+`src/play`, driven from `python/splendor_play`).
 
 ## Environment
 

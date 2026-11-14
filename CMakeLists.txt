@@ -55,6 +55,8 @@ add_library(splendor_play src/play/json.cpp src/play/match.cpp src/play/render.c
 add_library(splendor::play ALIAS splendor_play)
 set_target_properties(splendor_play PROPERTIES EXPORT_NAME play)
 target_link_libraries(splendor_play PUBLIC splendor_game)
+# A shared play library finds the shared game library installed beside it.
+set_target_properties(splendor_play PROPERTIES INSTALL_RPATH "$<IF:$<PLATFORM_ID:Darwin>,@loader_path,$ORIGIN>")
 target_compile_options(splendor_play PRIVATE -Wall -Wextra -Wpedantic)
 
 # The standard catalog that every consumer loads: in this source tree, or installed

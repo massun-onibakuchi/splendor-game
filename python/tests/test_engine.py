@@ -61,16 +61,13 @@ def test_the_choice_table_is_the_rendered_choices_column_by_column() -> None:
 
 def test_index_selection_plays_the_key_selected_game() -> None:
     by_index, by_key = _episode(11), _episode(11)
-    trace_index, trace_key = by_index.drain_trace(), by_key.drain_trace()
     while not by_index.is_terminal():
         index = by_index.decision_seed() % by_index.choice_count()
         key = by_key.choices()[index]
         by_index.select_index(index)
         by_key.select(key)
-        trace_index += by_index.drain_trace()
-        trace_key += by_key.drain_trace()
+        assert by_index.observe(0) == by_key.observe(0)
     assert by_key.is_terminal()
-    assert trace_index == trace_key
     assert by_index.terminal() == by_key.terminal()
     # A finished episode has no decision: no keys, and no table to stage.
     assert by_index.choices() == ()

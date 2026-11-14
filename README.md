@@ -2,7 +2,8 @@
 
 Native Splendor for two to four seats and agents of any kind: a C++20 game engine with staged
 decisions, legal-choice surfaces, chance, seat views, replay and match clocks; Python
-bindings; and a practical-play host for human-versus-agent matches.
+bindings; and a native practical-play host for matches between humans and agents in any
+combination.
 
 Contracts live in [docs/specs](docs/specs/spec.md).
 
@@ -31,8 +32,9 @@ target_link_libraries(your_target PRIVATE splendor::game)
 
 `splendor/episode.hpp` is the recorded game a host drives; `splendor/turn.hpp`,
 `splendor/choice_columns.hpp` and `splendor/detail/*.hpp` are the surfaces and trusted
-fast paths batched producers and searches build on. `splendor::play` adds the JSON
-renderings hosts and boards share (`splendor/play/render.hpp`).
+fast paths batched producers and searches build on. `splendor::play` adds the native match
+host (`splendor/play/match.hpp`) and the JSON renderings hosts and boards share
+(`splendor/play/render.hpp`).
 
 Any catalog of the standard shape loads; its identity is its declared contract and payload
 digest. Every seed derives from the seed law, whose domain-separation tag is the build
@@ -53,5 +55,6 @@ print(episode.terminal())
 ```
 
 Native extensions `cimport splendor_game.engine` and link the shared library under
-`splendor_game.NATIVE_PREFIX`. `splendor_play` serves a human-versus-agent match:
-`make_server(setup, agents, static=..., catalog_path=..., archive=Archive(...), ...)`.
+`splendor_game.NATIVE_PREFIX`. `splendor_play` serves a match whose seats are any mix of
+humans and agents: `make_server(setup, agents, static=..., catalog_path=...,
+archive=Archive(...), ...)`.

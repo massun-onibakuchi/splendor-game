@@ -51,7 +51,7 @@ target_compile_options(splendor_game PRIVATE -Wall -Wextra -Wpedantic)
 
 # Hosts and boards: presentation over the game library. The game library itself has no
 # JSON and no host.
-add_library(splendor_play src/play/json.cpp src/play/render.cpp)
+add_library(splendor_play src/play/json.cpp src/play/match.cpp src/play/render.cpp)
 add_library(splendor::play ALIAS splendor_play)
 set_target_properties(splendor_play PROPERTIES EXPORT_NAME play)
 target_link_libraries(splendor_play PUBLIC splendor_game)
@@ -108,6 +108,7 @@ add_executable(splendor_game_tests
   tests/candidate_transition_test.cpp
   tests/catalog_seed_state_test.cpp
   tests/clock_test.cpp
+  tests/match_host_test.cpp
   tests/match_test.cpp
   tests/play_json_test.cpp
   tests/player_count_test.cpp

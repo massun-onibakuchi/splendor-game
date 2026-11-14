@@ -638,8 +638,8 @@ class Match:
 
     @staticmethod
     def _result_text(result: Mapping[str, Any], names: list[str]) -> str:
-        winner = result["winner_seat"]
-        outcome = "draw" if winner is None else f"{names[winner]} wins"
+        winners = result["winners"]
+        outcome = "draw" if len(winners) != 1 else f"{names[winners[0]]} wins"
         return f"{outcome} ({result['reason']}, prestige {result['final_prestige']})"
 
     def _touch(self) -> None:

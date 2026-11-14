@@ -120,8 +120,10 @@ def test_a_spent_tournament_bank_loses_on_time(board_url) -> None:
     human = state["settings"]["human_seat"]
     assert state["result"] == {
         "reason": "timeout",
-        "winner_seat": 1 - human,
+        "winners": [1 - human],
         "final_prestige": [0, 0],
+        "purchased_cards": [0, 0],
+        "timed_out_seat": human,
     }
 
 
@@ -154,8 +156,10 @@ def test_replacement_preserves_pending_time_and_adjudicates_expiry(
     assert state["result"] == (
         {
             "reason": "timeout",
-            "winner_seat": 1 - original["human_seat"],
+            "winners": [1 - original["human_seat"]],
             "final_prestige": [0, 0],
+            "purchased_cards": [0, 0],
+            "timed_out_seat": original["human_seat"],
         }
         if finished else None
     )
@@ -196,14 +200,18 @@ def test_replay_regenerates_presentation_from_game_facts(board_url, paused_log) 
         # An unfinished board claimed as an ordinary win.
         lambda log: {
             "reason": "prestige",
-            "winner_seat": log["human_seat"],
+            "winners": [log["human_seat"]],
             "final_prestige": [15, 0],
+            "purchased_cards": [0, 0],
+            "timed_out_seat": None,
         },
         # A forfeit awarded to the wrong side.
         lambda log: {
             "reason": "timeout",
-            "winner_seat": log["human_seat"],
+            "winners": [log["human_seat"]],
             "final_prestige": [0, 0],
+            "purchased_cards": [0, 0],
+            "timed_out_seat": 1 - log["human_seat"],
         },
     ],
 )
@@ -223,8 +231,10 @@ def test_a_forfeit_at_the_human_decision_restores_finished(board_url, paused_log
     log = copy.deepcopy(paused_log)
     log["result"] = {
         "reason": "timeout",
-        "winner_seat": 1 - log["human_seat"],
+        "winners": [1 - log["human_seat"]],
         "final_prestige": [player["prestige"] for player in players],
+        "purchased_cards": [player["purchased_cards"] for player in players],
+        "timed_out_seat": log["human_seat"],
     }
     status, _ = _restore(board_url, log)
     assert status == 200
@@ -240,8 +250,10 @@ def _finished_by_forfeit(board_url: str, paused_log: dict) -> dict:
     log = copy.deepcopy(paused_log)
     log["result"] = {
         "reason": "timeout",
-        "winner_seat": 1 - log["human_seat"],
+        "winners": [1 - log["human_seat"]],
         "final_prestige": [player["prestige"] for player in players],
+        "purchased_cards": [player["purchased_cards"] for player in players],
+        "timed_out_seat": log["human_seat"],
     }
     assert _restore(board_url, log)[0] == 200
     return _get(board_url + "api/state")

@@ -4,7 +4,6 @@
 from libcpp.string cimport string
 from libcpp.vector cimport vector
 from libcpp.optional cimport optional
-from libcpp.utility cimport move
 from libc.stdint cimport int8_t, uint8_t, uint16_t, uint32_t, uint64_t
 from libc.string cimport memcpy
 
@@ -92,7 +91,6 @@ cdef extern from *:
     """
     #include "splendor/episode.hpp"
     #include "splendor/choice_columns.hpp"
-    #include "splendor/replay.hpp"
     #include "splendor/play/render.hpp"
     // Presentation shims: keys and JSON renderings derive from the typed episode.
     static void splendor_choice_columns(const splendor::TurnEpisode& episode,
@@ -123,46 +121,9 @@ cdef extern from *:
     static std::string splendor_choice_details(const splendor::TurnEpisode& episode) {
         return splendor::play::choices_json(episode.legal_choices(), episode.world().state);
     }
-    static std::string splendor_token_takes(const splendor::TurnEpisode& episode) {
-        if (episode.is_terminal()) return "[]";
-        return splendor::play::token_takes_json(episode.world());
-    }
     static std::string splendor_result(const splendor::TurnEpisode& episode) {
         if (!episode.terminal()) throw std::logic_error("episode is not terminal");
         return splendor::play::result_json(splendor::match_result(*episode.terminal()));
-    }
-    static std::string splendor_timeout_result(const splendor::TurnEpisode& episode, std::uint8_t loser) {
-        return splendor::play::result_json(splendor::timeout_result(episode.world().state, loser));
-    }
-    static std::string splendor_adjudicate_timeout(
-            const splendor::TurnEpisode& episode, const splendor::GameClock& clock, double now_ms) {
-        const auto result = episode.adjudicate_timeout(clock, now_ms);
-        return result ? splendor::play::result_json(*result) : std::string();
-    }
-    // One drained step for the host log: its key and choice rendering, verified first
-    // against a replay's persisted facts when one is active.
-    struct SplendorTraceRow {
-        std::uint32_t game_ply{};
-        std::uint8_t actor{};
-        bool forced{};
-        std::string action_key;
-        std::string choice;
-        std::optional<std::uint8_t> refill_slot;
-        std::optional<std::uint16_t> refill_card;
-        std::optional<std::uint8_t> blind_draw_tier;
-    };
-    static std::vector<SplendorTraceRow> splendor_drain_trace(
-            splendor::TurnEpisode& episode, splendor::TraceReplay* replay) {
-        const std::vector<splendor::TurnTraceStep> steps = episode.drain_trace();
-        if (replay) replay->verify(steps);
-        std::vector<SplendorTraceRow> rows;
-        rows.reserve(steps.size());
-        for (const splendor::TurnTraceStep& step : steps) {
-            rows.push_back({step.game_ply, step.actor, step.forced, splendor::choice_key(step.choice),
-                            splendor::play::choice_json(step.choice, step.noble_ids),
-                            step.refill_slot, step.refill_card, step.blind_draw_tier});
-        }
-        return rows;
     }
     """
     void splendor_choice_columns(const NativeTurnEpisode&, ChoiceColumns&) except +
@@ -172,20 +133,7 @@ cdef extern from *:
     void splendor_select_key(NativeTurnEpisode&, const string&) except +
     string splendor_observe(const NativeTurnEpisode&, uint8_t) except +
     string splendor_choice_details(const NativeTurnEpisode&) except +
-    string splendor_token_takes(const NativeTurnEpisode&) except +
     string splendor_result(const NativeTurnEpisode&) except +
-    string splendor_timeout_result(const NativeTurnEpisode&, uint8_t) except +
-    string splendor_adjudicate_timeout(const NativeTurnEpisode&, const GameClock&, double) except +
-    cppclass SplendorTraceRow:
-        uint32_t game_ply
-        uint8_t actor
-        bint forced
-        string action_key
-        string choice
-        optional[uint8_t] refill_slot
-        optional[uint16_t] refill_card
-        optional[uint8_t] blind_draw_tier
-    vector[SplendorTraceRow] splendor_drain_trace(NativeTurnEpisode&, TraceReplay*) except +
 
 # The seat counts a game may have; each count's rules are a game of their own.
 MIN_PLAYERS = kMinPlayers
@@ -222,13 +170,6 @@ def derive64(root, str domain, coordinates=()):
     return splendor_derive64(seed, domain.encode("utf-8"), native)
 
 
-cdef uint64_t _uint(value, object bits, str name) except? 0:
-    # `bits` stays a Python int: the bound `1 << 32` overflows a C int.
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < (1 << bits):
-        raise ValueError(f"{name} must be a uint{bits}")
-    return value
-
-
 cdef TimeControl time_control(str kind, allowance_ms, forfeit_on_timeout=()) except *:
     cdef TimeControl control
     if kind == "turn":
@@ -253,6 +194,12 @@ cdef object _column(const void* data, size_t count, str fmt, size_t itemsize, tu
     if count:
         memcpy(<char*>storage, data, count * itemsize)
     return memoryview(storage).cast(fmt, shape)
+
+
+cdef int _require_owned(Episode episode) except -1:
+    if episode._owner is not None:
+        raise ValueError("a view of a host's episode cannot change it")
+    return 0
 
 
 cdef class Catalog:
@@ -288,15 +235,17 @@ cdef class Episode:
     draws and turn completion are applied natively. The episode keeps its catalog alive.
     """
 
-    def __cinit__(self, Catalog catalog not None, uint8_t player_count, uint32_t max_game_plies,
-                  uint64_t setup_seed, uint64_t episode_seed):
+    def __init__(self, Catalog catalog not None, uint8_t player_count, uint32_t max_game_plies,
+                 uint64_t setup_seed, uint64_t episode_seed):
+        if self._episode != NULL:
+            raise ValueError("an episode is constructed once")
         self.catalog = catalog
         self._episode = new NativeTurnEpisode(
             catalog._catalog[0], player_count, max_game_plies, setup_seed, episode_seed)
 
     def __dealloc__(self):
-        del self._episode
-        del self._replay
+        if self._owner is None:
+            del self._episode
 
     @property
     def max_game_plies(self):
@@ -365,21 +314,14 @@ cdef class Episode:
         """The finished game's result as JSON text."""
         return splendor_result(self._episode[0]).decode("ascii")
 
-    def timeout_result(self, uint8_t loser):
-        """The result were `loser` to time out at the pending decision, as JSON text."""
-        return splendor_timeout_result(self._episode[0], loser).decode("ascii")
-
-    def adjudicate_timeout(self, Clock clock not None, double now_ms):
-        """The pending actor's timeout under `clock` as result JSON text, or `None`."""
-        cdef string result = splendor_adjudicate_timeout(self._episode[0], clock._clock[0], now_ms)
-        return result.decode("ascii") if result.size() else None
-
     def select(self, str action_key):
         """Apply the legal choice with this key; any other key is rejected unchanged."""
+        _require_owned(self)
         splendor_select_key(self._episode[0], action_key.encode("ascii"))
 
     def select_index(self, size_t index):
         """Apply the legal choice at this position of choice order."""
+        _require_owned(self)
         self._episode.select(index)
 
     def observe(self, uint8_t observer):
@@ -390,83 +332,33 @@ cdef class Episode:
         """The legal choices as JSON text, public referents resolved, in key order."""
         return splendor_choice_details(self._episode[0]).decode("ascii")
 
-    def token_takes(self):
-        """A MAIN decision's official gem takes before any return, as JSON text."""
-        return splendor_token_takes(self._episode[0]).decode("ascii")
-
-    def drain_trace(self):
-        """Every choice applied since the previous drain, forced ones included.
-
-        `choice` is the JSON text `choice_details` gave the choice at its decision.
-        """
-        cdef vector[SplendorTraceRow] steps = splendor_drain_trace(self._episode[0], self._replay)
-        return [
-            {
-                "game_ply": step.game_ply,
-                "actor": step.actor,
-                "forced": bool(step.forced),
-                "action_key": step.action_key.decode("ascii"),
-                "choice": step.choice.decode("ascii"),
-                "refill_slot": step.refill_slot.value() if step.refill_slot.has_value() else None,
-                "refill_card": step.refill_card.value() if step.refill_card.has_value() else None,
-                "blind_draw_tier": (
-                    step.blind_draw_tier.value() if step.blind_draw_tier.has_value() else None
-                ),
-            }
-            for step in steps
-        ]
-
-    def expect_trace(self, rows):
-        """Parse persisted trace facts once, before draining any generated trace: every
-        later drain is verified against them, and `finish_replay` requires all of them."""
-        cdef vector[RecordedStep] expected
-        cdef RecordedStep step
-        if self._replay != NULL:
-            raise ValueError("a replay is already active")
-        for row in rows:
-            step.game_ply = <uint32_t>_uint(row["game_ply"], 32, "game_ply")
-            step.actor = <uint8_t>_uint(row["actor"], 8, "actor")
-            if type(row["forced"]) is not bool:
-                raise ValueError("forced must be boolean")
-            step.forced = row["forced"]
-            if type(row["action_key"]) is not str:
-                raise ValueError("action_key must be a string")
-            step.action_key = row["action_key"].encode("ascii")
-            step.refill_slot.reset()
-            step.refill_card.reset()
-            if row["refill_slot"] is not None:
-                step.refill_slot = <uint8_t>_uint(row["refill_slot"], 8, "refill_slot")
-            if row["refill_card"] is not None:
-                step.refill_card = <uint16_t>_uint(row["refill_card"], 16, "refill_card")
-            expected.push_back(move(step))
-        self._replay = new TraceReplay(move(expected))
-
-    def finish_replay(self):
-        if self._replay == NULL:
-            raise ValueError("no replay is active")
-        self._replay.finish()
-        del self._replay
-        self._replay = NULL
-
-
 cdef class Clock:
     """One match's native clock (`splendor::GameClock`): `kind` `turn` or `bank`, one
     allowance in milliseconds per seat. Times are the caller's monotonic milliseconds."""
 
-    def __cinit__(self, str kind, allowance_ms, forfeit_on_timeout=()):
+    def __init__(self, str kind, allowance_ms, forfeit_on_timeout=()):
+        if self._clock != NULL:
+            raise ValueError("a clock is constructed once")
         self._clock = new GameClock(time_control(kind, allowance_ms, forfeit_on_timeout))
 
     def __dealloc__(self):
-        del self._clock
+        if self._owner is None:
+            del self._clock
 
     def run(self, uint8_t seat, uint32_t game_ply, double now_ms):
+        if self._owner is not None:
+            raise ValueError("a view of a host's clock cannot change it")
         self._clock.run(seat, game_ply, now_ms)
 
     def stop(self, double now_ms):
+        if self._owner is not None:
+            raise ValueError("a view of a host's clock cannot change it")
         self._clock.stop(now_ms)
 
     def record(self, uint8_t seat, uint32_t game_ply, uint64_t used_ms):
         """Adopt a logged decision's turn-cumulative use while stopped."""
+        if self._owner is not None:
+            raise ValueError("a view of a host's clock cannot change it")
         self._clock.record(seat, game_ply, used_ms)
 
     def running(self):
@@ -490,3 +382,18 @@ cdef class Clock:
 
     def remaining_ms(self, uint8_t seat, double now_ms):
         return self._clock.remaining_ms(seat, now_ms)
+
+
+cdef Episode episode_view(const NativeTurnEpisode* episode, Catalog catalog, object owner):
+    cdef Episode view = Episode.__new__(Episode)
+    view.catalog = catalog
+    view._episode = <NativeTurnEpisode*>episode
+    view._owner = owner
+    return view
+
+
+cdef Clock clock_view(const GameClock* clock, object owner):
+    cdef Clock view = Clock.__new__(Clock)
+    view._clock = <GameClock*>clock
+    view._owner = owner
+    return view

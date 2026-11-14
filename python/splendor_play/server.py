@@ -13,13 +13,10 @@ from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
 from splendor_game import Catalog
+from splendor_play._native import catalog_view
 from splendor_play.agents import AgentFactory, MatchSetup
 from splendor_play.archive import Archive
-from splendor_play.match import (
-    Match,
-    load_catalog_view,
-    resolve_match_settings,
-)
+from splendor_play.match import Match
 
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -47,7 +44,7 @@ def _assets(static: Path) -> dict[str, tuple[Path, str]]:
     return assets
 
 
-class _Versus:
+class _Host:
     """The server's one live match; a new or restored match replaces it."""
 
     def __init__(
@@ -56,8 +53,14 @@ class _Versus:
         self.setup = setup
         self.agents = agents
         self.catalog = Catalog(catalog_path)
-        self.catalog_view = load_catalog_view(catalog_path)
         self.archive = archive
+        # Static for the server's lifetime: offered actors, conditions, rules and catalog.
+        self.config = (
+            '{"actors":' + json.dumps([actor.summary() for actor in setup.actors])
+            + ',"conditions":' + json.dumps(dict(setup.conditions))
+            + ',"max_game_plies":' + json.dumps(setup.max_game_plies)
+            + ',"catalog":' + catalog_view(self.catalog) + "}"
+        ).encode()
         self.lock = threading.Lock()
         # Every mutation holds this: creations never load two model sessions at once, and
         # no command reaches a match while it is being replaced.
@@ -65,45 +68,25 @@ class _Versus:
         self.match: Match | None = None
         self.match_id = 0
 
-    def config(self) -> dict[str, Any]:
-        return {
-            "models": [model.summary() for model in self.setup.models],
-            "search": self.setup.search,
-            "max_game_plies": self.setup.max_game_plies,
-            "catalog": self.catalog_view,
-        }
+    def new_match(self, request: Mapping[str, Any]) -> None:
+        self._install(lambda: Match.create(
+            self.setup, request, catalog=self.catalog, agents=self.agents, archive=self.archive,
+        ))
 
-    def new_match(self, raw: Any) -> None:
-        settings = resolve_match_settings(raw, self.setup)
-        self._install(
-            lambda: Match(
-                self.setup,
-                settings,
-                catalog=self.catalog,
-                catalog_view=self.catalog_view,
-                agent=self.agents(self.setup.model(settings.model)),
-                archive=self.archive,
-            )
-        )
-
-    def restore(self, raw: Mapping[str, Any]) -> None:
+    def restore(self, request: Mapping[str, Any]) -> None:
         """Restart a logged match, from an uploaded log or an archived game."""
-        if ("log" in raw) == ("game_id" in raw):
+        if set(request) not in ({"log"}, {"game_id"}):
             raise ValueError("restore needs exactly one of log or game_id")
 
         def create() -> Match:
             # Read an archived log only once the live match is closed: its last
             # decision may still be landing in that same archive.
-            log = raw["log"] if "log" in raw else self.archive.load(raw["game_id"])
-            if not isinstance(log, dict):
-                raise ValueError("the log must be a JSON object")
+            log = (
+                json.dumps(request["log"]) if "log" in request
+                else self.archive.load(request["game_id"])
+            )
             return Match.restore(
-                self.setup,
-                log,
-                catalog=self.catalog,
-                catalog_view=self.catalog_view,
-                agent=self.agents(self.setup.logged_model(log["model"])),
-                archive=self.archive,
+                self.setup, log, catalog=self.catalog, agents=self.agents, archive=self.archive,
             )
 
         self._install(create)
@@ -137,8 +120,18 @@ class _Versus:
             match.close()
 
 
+def _seat(query: Mapping[str, list[str]], match: Match) -> int:
+    """The requested perspective seat, or the match's default."""
+    raw = (query.get("seat") or [None])[0]
+    if raw is None:
+        return match.default_perspective
+    if not raw.isascii() or not raw.isdecimal():
+        raise ValueError("seat must be a seat index")
+    return int(raw)
+
+
 def _handler(
-    versus: _Versus, assets: Mapping[str, tuple[Path, str]], allowed_hosts: frozenset[str]
+    versus: _Host, assets: Mapping[str, tuple[Path, str]], allowed_hosts: frozenset[str]
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "splendor-play"
@@ -184,13 +177,13 @@ def _handler(
                 path, content_type = assets[url.path]
                 self._send(HTTPStatus.OK, path.read_bytes(), content_type)
             elif url.path == "/api/config":
-                self._json(versus.config())
+                self._send(HTTPStatus.OK, versus.config, "application/json")
             elif url.path == "/api/state":
                 self._state(parse_qs(url.query))
             elif url.path in {"/api/export.json", "/api/export.txt"}:
-                self._export(url.path.endswith(".json"))
+                self._export(url.path.endswith(".json"), parse_qs(url.query))
             elif url.path == "/api/archive":
-                self._json(versus.archive.listing())
+                self._send(HTTPStatus.OK, versus.archive.listing().encode(), "application/json")
             else:
                 self._error(HTTPStatus.NOT_FOUND, "not found")
 
@@ -200,42 +193,39 @@ def _handler(
             except ValueError:
                 self._json({"match_id": None})
                 return
-            state = match.state()
-            known = (query.get("match") or [None])[0], (query.get("since") or [None])[0]
-            if known == (str(match_id), str(state["version"])):
-                # Unchanged: only the moving parts a client animates between moves.
-                self._json(
-                    {
-                        "match_id": match_id,
-                        "version": state["version"],
-                        "clock": state["clock"],
-                        "thinking": state["thinking"],
-                    }
-                )
-                return
-            self._json({"match_id": match_id, **state})
-
-        def _export(self, as_json: bool) -> None:
+            since = None
+            if (query.get("match") or [None])[0] == str(match_id):
+                known = (query.get("since") or [""])[0]
+                since = int(known) if known.isascii() and known.isdecimal() else None
+            # Out-of-range numbers fail at the native boundary as OverflowError.
             try:
-                _, match = versus.current()
-            except ValueError as error:
+                body = match.state(_seat(query, match), since)
+            except (OverflowError, ValueError) as error:
                 self._error(HTTPStatus.CONFLICT, str(error))
                 return
-            export = match.export()
-            name = f"splendor-versus-{export['seed']}"
+            # The native state is a JSON object; the server names which match it belongs to.
+            self._send(
+                HTTPStatus.OK, b'{"match_id":' + str(match_id).encode() + b"," + body[1:],
+                "application/json",
+            )
+
+        def _export(self, as_json: bool, query: Mapping[str, list[str]]) -> None:
+            try:
+                _, match = versus.current()
+                seat = _seat(query, match)
+                body = match.export(seat) if as_json else match.export_text(seat)
+            except (OverflowError, ValueError) as error:
+                self._error(HTTPStatus.CONFLICT, str(error))
+                return
+            name = f"splendor-{match.game_id}"
             if as_json:
-                body = json.dumps(export, indent=2).encode()
                 self._send(
-                    HTTPStatus.OK,
-                    body,
-                    "application/json",
+                    HTTPStatus.OK, body.encode(), "application/json",
                     Content_Disposition=f'attachment; filename="{name}.json"',
                 )
             else:
                 self._send(
-                    HTTPStatus.OK,
-                    match.export_text().encode(),
-                    "text/plain; charset=utf-8",
+                    HTTPStatus.OK, body.encode(), "text/plain; charset=utf-8",
                     Content_Disposition=f'attachment; filename="{name}.txt"',
                 )
 
@@ -274,13 +264,15 @@ def _handler(
                         elif path == "/api/resume":
                             match.resume()
                         elif path == "/api/play":
+                            if type(body["revision"]) is not int:
+                                raise ValueError("revision must be an integer")
                             match.play(body["key"], body["revision"])
                         elif path == "/api/analyze":
                             match.analyze(body["history_index"])
                         else:
                             self._error(HTTPStatus.NOT_FOUND, "not found")
                             return
-            except (KeyError, TypeError, ValueError) as error:
+            except (KeyError, OverflowError, TypeError, ValueError) as error:
                 self._error(HTTPStatus.CONFLICT, str(error))
                 return
             self._json({"ok": True})
@@ -291,7 +283,7 @@ def _handler(
 class BoardServer(ThreadingHTTPServer):
     """Closing the server also stops the live match's search."""
 
-    versus: _Versus
+    versus: _Host
 
     def server_close(self) -> None:
         super().server_close()
@@ -309,12 +301,12 @@ def make_server(
     port: int,
 ) -> BoardServer:
     """Bind the board in `static` on an IPv4 loopback address; port 0 picks a free one.
-    `agents` builds the model side of each new or restored match."""
+    `agents` builds each agent seat of a new or restored match."""
     address = ipaddress.ip_address(host)
     if address.version != 4 or not address.is_loopback:
-        raise ValueError("the versus server binds only to an IPv4 loopback address")
+        raise ValueError("the board server binds only to an IPv4 loopback address")
     assets = _assets(Path(static))
-    versus = _Versus(setup, agents, Path(catalog_path), archive)
+    versus = _Host(setup, agents, Path(catalog_path), archive)
     server = BoardServer((host, port), _handler(versus, assets, frozenset()))
     server.versus = versus
     bound = server.server_address[1]
@@ -329,7 +321,7 @@ def serve(server: BoardServer) -> None:
     """Serve a `make_server` board until interrupted, then stop its live match."""
     host, port = server.server_address[:2]
     print(
-        f"Splendor versus board: http://{host}:{port}/ "
+        f"Splendor board: http://{host}:{port}/ "
         f"(games archived in {server.versus.archive.root.absolute()})",
         flush=True,
     )

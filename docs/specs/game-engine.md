@@ -17,11 +17,12 @@ depends on one. The CMake package is `SplendorGame` (targets `splendor::game` an
 consumer that adds this directory instead reads `SPLENDOR_GAME_CATALOG`.
 
 `splendor::game` holds no JSON and no host. `splendor::play` builds hosts and boards on it:
-the [presentation renderings](../../include/splendor/play/render.hpp) of boards, choices
-and results that Python and WebAssembly hosts share, so neither carries a second renderer.
+the [native match host](play.md) and the [presentation renderings](../../include/splendor/play/render.hpp)
+of boards, choices and results that Python and WebAssembly hosts share, so neither carries
+a second host or renderer.
 
 The `splendor-game` Python distribution has no runtime dependencies. `splendor_game`
-binds the engine and its clock; [`splendor_play`](play.md) hosts practical matches. A
+binds the engine and its clock; [`splendor_play`](play.md) drives the native match host. A
 downstream native extension `cimport`s [`splendor_game.engine`](../../python/splendor_game/engine.pxd),
 reads an `Episode`'s or `Clock`'s native object directly and links the one shared library
 under `NATIVE_PREFIX`; it MUST NOT embed a second engine. A bridge MUST NOT serialize a

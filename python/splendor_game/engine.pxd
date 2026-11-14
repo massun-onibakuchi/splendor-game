@@ -51,28 +51,22 @@ cdef extern from "splendor/episode.hpp" namespace "splendor":
         bint is_terminal()
         void select(size_t) except +
 
-cdef extern from "splendor/replay.hpp" namespace "splendor":
-    cppclass RecordedStep:
-        uint32_t game_ply
-        uint8_t actor
-        bint forced
-        string action_key
-        optional[uint8_t] refill_slot
-        optional[uint16_t] refill_card
-    cppclass TraceReplay:
-        TraceReplay(vector[RecordedStep]) except +
-        void finish() except +
-
 # A validated native time control: `kind` `turn` or `bank`, one allowance per seat.
 cdef TimeControl time_control(str kind, allowance_ms, forfeit_on_timeout=*) except *
 
 cdef class Catalog:
     cdef NativeCatalog* _catalog
 
+# An `Episode` or `Clock` owns its native object, or views one that `_owner` keeps alive.
+# Read-only views are what an agent receives of a host's episode and clock.
 cdef class Episode:
     cdef NativeTurnEpisode* _episode
     cdef readonly Catalog catalog
-    cdef TraceReplay* _replay
+    cdef object _owner
 
 cdef class Clock:
     cdef GameClock* _clock
+    cdef object _owner
+
+cdef Episode episode_view(const NativeTurnEpisode* episode, Catalog catalog, object owner)
+cdef Clock clock_view(const GameClock* clock, object owner)

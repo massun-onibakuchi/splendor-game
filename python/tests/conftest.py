@@ -1,7 +1,8 @@
-"""A live play host with a deterministic scripted agent: no model, real native engine."""
+"""A live play host with deterministic scripted agents: no model, real native engine."""
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -11,7 +12,7 @@ from typing import Any
 import pytest
 
 from splendor_game import STANDARD_CATALOG, Clock, Episode
-from splendor_play import VERSUS_LOG_SCHEMA, Archive, SearchJob, make_server
+from splendor_play import MATCH_LOG_SCHEMA, Archive, SearchJob, make_server
 
 MAX_GAME_PLIES = 160
 # A scripted search's slices: a move ends once its budget passes, a review or a ponder
@@ -32,23 +33,10 @@ class Actor:
 
 @dataclass(frozen=True)
 class Setup:
-    models: tuple[Actor, ...]
-    log_contract: str = VERSUS_LOG_SCHEMA
+    actors: tuple[Actor, ...]
+    log_contract: str = MATCH_LOG_SCHEMA
     max_game_plies: int = MAX_GAME_PLIES
-    search: Mapping[str, Any] = field(default_factory=lambda: {"kind": "scripted"})
-    leaf_batch: int = 1
-
-    def model(self, label: str) -> Actor:
-        for model in self.models:
-            if model.label == label:
-                return model
-        raise ValueError(f"unknown model: {label}")
-
-    def logged_model(self, summary: Mapping[str, Any]) -> Actor:
-        for model in self.models:
-            if model.identity == summary["identity"]:
-                return model
-        raise ValueError(f"this server does not offer the model {summary['identity']}")
+    conditions: Mapping[str, Any] = field(default_factory=lambda: {"search": "scripted"})
 
 
 class _Budget:
@@ -64,9 +52,10 @@ class _Budget:
 class ScriptedAgent:
     """Selects a decision's first legal choice after a sliced, reported 'search'."""
 
-    def __init__(self, actor: Actor) -> None:
+    def __init__(self, actor: Actor, seat: int) -> None:
         self.actor = actor
-        self._selection: tuple[tuple[int, str, tuple[str, ...]], str] | None = None
+        self.seat = seat
+        self._selection: tuple[int, str, tuple[str, ...]] | None = None
 
     @staticmethod
     def _decision(episode: Episode) -> tuple[int, str, tuple[str, ...]]:
@@ -81,44 +70,50 @@ class ScriptedAgent:
     def timer(self, clock: Clock, now_ms: float) -> _Budget:
         return _Budget()
 
-    def search(self, job: SearchJob, root: object,
-               publish: Callable[[dict[str, Any], int], None]) -> dict[str, Any]:
+    def search(self, job: SearchJob, root: object, publish: Callable[[str, int], None]) -> str:
         _, _, keys = root
         slices = 0
         while True:
             time.sleep(_SLICE_SECONDS)
             slices += 1
-            report = {
+            report = json.dumps({
                 "selected_key": keys[0],
                 "root_value": 0.25,
-                "root_evaluator_value": 0.125,
-                "model_value": 0.25 if job.model_to_move else -0.25,
                 "root_visits": slices,
-                "reused_tree": False,
-                "candidate_count": len(keys),
                 "top_candidates": [
                     {"action_key": key, "visits": slices if index == 0 else 0}
                     for index, key in enumerate(keys[:3])
                 ],
-            }
+            })
             publish(report, 1)
             ended = job.timer is not None and job.timer.end() is not None
             if job.done.is_set() or ended or slices >= _SLICE_LIMIT:
-                self._selection = (root, keys[0])
+                self._selection = root
                 return report
 
-    def apply(self, episode: Episode) -> None:
-        if self._selection is None or self._selection[0] != self._decision(episode):
+    def selection(self, episode: Episode) -> int:
+        if self._selection is None or self._selection != self._decision(episode):
             raise ValueError("the selection belongs to another decision")
-        episode.select(self._selection[1])
+        return 0
 
 
 ACTOR = Actor("Scripted @1", "scripted-v1")
 
 
+def _server(archive, static, max_game_plies: int):
+    server = make_server(
+        Setup((ACTOR,), max_game_plies=max_game_plies), ScriptedAgent, static=static,
+        catalog_path=STANDARD_CATALOG, archive=Archive(archive, log_contract=MATCH_LOG_SCHEMA),
+        host="127.0.0.1", port=0,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
 @pytest.fixture(scope="session")
 def board_archive(tmp_path_factory: pytest.TempPathFactory):
-    return tmp_path_factory.mktemp("versus-games")
+    return tmp_path_factory.mktemp("match-games")
 
 
 @pytest.fixture(scope="session")
@@ -133,16 +128,16 @@ def board_static(tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(scope="session")
 def board_url(board_archive, board_static):
-    server = make_server(
-        Setup((ACTOR,)), ScriptedAgent, static=board_static, catalog_path=STANDARD_CATALOG,
-        archive=Archive(
-            board_archive, log_contract=VERSUS_LOG_SCHEMA,
-            identity=lambda summary: summary["identity"],
-        ),
-        host="127.0.0.1", port=0,
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    server = _server(board_archive, board_static, MAX_GAME_PLIES)
+    yield f"http://127.0.0.1:{server.server_address[1]}/"
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.fixture(scope="session")
+def short_board_url(tmp_path_factory: pytest.TempPathFactory, board_static):
+    """A host whose games end at a short ply cap, so agent-only games finish quickly."""
+    server = _server(tmp_path_factory.mktemp("short-games"), board_static, 12)
     yield f"http://127.0.0.1:{server.server_address[1]}/"
     server.shutdown()
     server.server_close()

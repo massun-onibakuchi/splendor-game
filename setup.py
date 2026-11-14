@@ -56,7 +56,10 @@ def build_native() -> Path:
     binary = str(Path(cmake.CMAKE_BIN_DIR) / "cmake")
     prefix = build / "install"
     subprocess.run([binary, *args], check=True)
-    subprocess.run([binary, "--build", str(build), "--parallel", str(os.cpu_count() or 1)], check=True)
+    # cmake reads CMAKE_BUILD_PARALLEL_LEVEL only when --parallel is absent; it bounds the
+    # build on a shared machine. A bare --parallel would let make spawn without limit.
+    jobs = [] if os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL") else ["--parallel", str(os.cpu_count() or 1)]
+    subprocess.run([binary, "--build", str(build), *jobs], check=True)
     subprocess.run([binary, "--install", str(build), "--prefix", str(prefix)], check=True)
     return prefix
 

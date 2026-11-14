@@ -5,8 +5,9 @@ binding (`python/splendor_game`) and the host's Python driver (`python/splendor_
 
 ## Environment
 
-- C++: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j`, then
-  `ctest --test-dir build --output-on-failure`.
+- C++: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build`, then
+  `ctest --test-dir build --output-on-failure`. `CMAKE_BUILD_PARALLEL_LEVEL` sets the build
+  jobs of these builds and of the ones `uv sync` runs.
 - Python through `uv`: `uv sync`, `uv run pytest`. `uv sync --reinstall-package
   splendor-game` rebuilds the native library after C++ changes.
 

@@ -9,8 +9,9 @@ Contracts live in [docs/specs](docs/specs/spec.md).
 ## Build and test
 
 ```sh
+export CMAKE_BUILD_PARALLEL_LEVEL=4   # build jobs: native builds by cmake and by uv sync
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
+cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/splendor_game_benchmark 3000      # uniform playouts: staged, recorded
 

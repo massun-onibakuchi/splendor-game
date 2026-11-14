@@ -38,4 +38,15 @@ std::string token_takes_json(const Decision& decision);
 // `{reason, winner_seat, final_prestige}`.
 std::string result_json(const MatchResult& result);
 
+// The catalog as display records indexed by ID: `{cards: [{id, tier, bonus, prestige, cost}],
+// nobles: [{id, prestige, requirements}]}`.
+std::string catalog_json(const Catalog& catalog);
+
+// One log line for a choice, in the past tense ("took 1 white, 1 blue"); `noble_ids` are the
+// visible nobles at its decision.
+std::string choice_text(
+    const TurnChoice& choice,
+    const Catalog& catalog,
+    std::span<const std::optional<std::uint16_t>> noble_ids);
+
 }  // namespace splendor::play

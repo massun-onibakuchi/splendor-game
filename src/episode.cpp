@@ -45,7 +45,9 @@ std::optional<TerminalFacts> play_choice(
     const TurnChoice& selected,
     const EpisodeSeeds& seeds,
     const std::uint32_t max_game_plies,
-    const Catalog& catalog) {
+    const Catalog& catalog,
+    PlayedChoice* const played) {
+    if (played) *played = {};
     TurnStep step;
     if (decision.phase == DecisionPhase::Main) {
         MainOutcome outcome = apply_main(decision, selected, max_game_plies, catalog);
@@ -55,6 +57,16 @@ std::optional<TerminalFacts> play_choice(
         if (outcome.awaiting_draw()) {
             card = select_episode_chance_card(
                 outcome.outcome_card_ids, seeds.draw(decision.state));
+        }
+        if (played) {
+            played->draw = outcome.draw;
+            played->drawn_card = card;
+            if (outcome.cleanup_count == 1) {
+                TurnChoice& cleanup = played->forced_cleanup.emplace();
+                cleanup.phase = DecisionPhase::Cleanup;
+                cleanup.returned = outcome.forced_return;
+                cleanup.noble_slot = outcome.forced_noble;
+            }
         }
         step = resolve_main(std::move(outcome), card, max_game_plies, catalog);
     } else {

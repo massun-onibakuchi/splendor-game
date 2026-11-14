@@ -2,13 +2,9 @@
 
 #include "splendor/detail/turn.hpp"
 
-#include <atomic>
 #include <stdexcept>
 
 namespace splendor {
-namespace {
-std::atomic<std::uint64_t> next_episode_identity{1};
-}  // namespace
 
 TurnEpisode::TurnEpisode(
     const Catalog& catalog,
@@ -19,8 +15,7 @@ TurnEpisode::TurnEpisode(
     : catalog_(catalog),
       max_game_plies_(max_game_plies),
       seeds_(episode_seed),
-      decision_{initial_state(catalog_, player_count, max_game_plies, setup_seed), DecisionPhase::Main},
-      identity_(next_episode_identity.fetch_add(1, std::memory_order_relaxed)) {
+      decision_{initial_state(catalog_, player_count, max_game_plies, setup_seed), DecisionPhase::Main} {
     settle();
 }
 
@@ -35,52 +30,36 @@ void TurnEpisode::settle() {
     }
 }
 
-// `detail::play_choice`, recording the choice, the draw it owed and, after a MAIN, the
-// forced cleanup that completed its turn.
+// Plays `choice` under `detail::play_choice` and records it, the draw it owed and, after a
+// MAIN, the forced cleanup that completed its turn.
 void TurnEpisode::apply(const TurnChoice& choice, const bool forced) {
-    const State& before = decision_.state;
-    TurnTraceStep& step = trace_.emplace_back();
-    step.game_ply = before.game_ply;
-    step.actor = before.current_player;
+    TurnTraceStep step;
+    step.game_ply = decision_.state.game_ply;
+    step.actor = decision_.state.current_player;
     step.forced = forced;
     step.choice = choice;
-    step.noble_ids = before.noble_ids;
-    TurnStep next;
-    if (decision_.phase == DecisionPhase::Main) {
-        MainOutcome outcome = apply_main(decision_, choice, max_game_plies_, catalog_);
-        // The environment draws whatever the turn owes, an ending turn's blind
-        // reservation included: the final world names every card.
-        std::optional<std::uint16_t> card;
-        if (outcome.draw) {
-            card = detail::select_episode_chance_card(outcome.outcome_card_ids, seeds_.draw(before));
-            if (outcome.draw->kind == DrawKind::Refill) {
-                step.refill_slot = static_cast<std::uint8_t>(detail::market_index(outcome.draw->tier, outcome.draw->slot));
-                step.refill_card = card;
-            } else {
-                step.blind_draw_tier = outcome.draw->tier;
-            }
-        }
-        if (outcome.cleanup_count == 1) {
-            TurnTraceStep cleanup;
-            cleanup.game_ply = step.game_ply;
-            cleanup.actor = step.actor;
-            cleanup.forced = true;
-            cleanup.choice.phase = DecisionPhase::Cleanup;
-            cleanup.choice.returned = outcome.forced_return;
-            cleanup.choice.noble_slot = outcome.forced_noble;
-            cleanup.noble_ids = step.noble_ids;
-            next = resolve_main(std::move(outcome), card, max_game_plies_, catalog_);
-            trace_.push_back(std::move(cleanup));
-        } else {
-            next = resolve_main(std::move(outcome), card, max_game_plies_, catalog_);
-        }
-    } else {
-        next = apply_cleanup(decision_, choice, max_game_plies_, catalog_);
+    step.noble_ids = decision_.state.noble_ids;
+    detail::PlayedChoice played;
+    terminal_ = detail::play_choice(decision_, choice, seeds_, max_game_plies_, catalog_, &played);
+    if (played.draw && played.draw->kind == DrawKind::Refill) {
+        step.refill_slot = static_cast<std::uint8_t>(detail::market_index(played.draw->tier, played.draw->slot));
+        step.refill_card = played.drawn_card;
+    } else if (played.draw) {
+        step.blind_draw_tier = played.draw->tier;
     }
-    decision_ = std::move(next.decision);
-    terminal_ = next.terminal;
+    if (played.forced_cleanup) {
+        TurnTraceStep cleanup;
+        cleanup.game_ply = step.game_ply;
+        cleanup.actor = step.actor;
+        cleanup.forced = true;
+        cleanup.choice = *played.forced_cleanup;
+        cleanup.noble_ids = step.noble_ids;
+        trace_.push_back(std::move(step));
+        trace_.push_back(std::move(cleanup));
+    } else {
+        trace_.push_back(std::move(step));
+    }
     if (terminal_) choices_.clear();
-    ++revision_;
 }
 
 std::optional<MatchResult> TurnEpisode::adjudicate_timeout(

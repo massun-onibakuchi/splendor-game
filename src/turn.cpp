@@ -619,12 +619,6 @@ void fill_cleanup_choices(
 
 }  // namespace
 
-std::vector<TurnChoice> cleanup_choices(const State& state, const Catalog& catalog) {
-    std::vector<TurnChoice> choices;
-    fill_cleanup_choices(state, catalog, choices);
-    return choices;
-}
-
 CleanupSupport cleanup_support(const State& state, const Catalog& catalog) {
     const PlayerState& player = state.players[state.current_player];
     ChoiceScratch& scratch = ChoiceScratch::local();

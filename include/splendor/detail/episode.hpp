@@ -38,16 +38,29 @@ std::uint16_t select_episode_chance_card(
     const std::vector<std::uint16_t>& card_ids,
     std::uint64_t draw_seed);
 
+// The environment's part of one played choice, for a recorder: the draw a MAIN owed and
+// the card the environment drew for it, and, when its turn offered exactly one cleanup,
+// that forced cleanup, which completed the turn without a CLEANUP decision. Empty after a
+// CLEANUP choice.
+struct PlayedChoice {
+    std::optional<OwedDraw> draw;
+    std::optional<std::uint16_t> drawn_card;
+    std::optional<TurnChoice> forced_cleanup;
+};
+
 // Plays `selected`, one of `decision`'s legal choices, and advances `decision` to the
 // next decision: after a MAIN choice the owed draw -- public refill or private blind
 // draw -- is made under the environment's seed for the turn, then a forced cleanup
-// completes the turn. Returns the terminal facts when the turn ended the game.
+// completes the turn. Returns the terminal facts when the turn ended the game. `played`,
+// when given, receives what the environment did: a recorded game and a batched producer
+// share this one law.
 std::optional<TerminalFacts> play_choice(
     Decision& decision,
     const TurnChoice& selected,
     const EpisodeSeeds& seeds,
     std::uint32_t max_game_plies,
-    const Catalog& catalog);
+    const Catalog& catalog,
+    PlayedChoice* played = nullptr);
 
 // Plays every decision with exactly one legal choice, which asks no policy, until
 // `choices` holds a real choice of `decision` or the game ends.

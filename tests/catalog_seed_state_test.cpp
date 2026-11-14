@@ -85,8 +85,8 @@ TEST(CatalogSeedStateTest, ACatalogIsIdentifiedByItsDeclaredContractAndPayload) 
 TEST(CatalogSeedStateTest, InitialSetupIsDeterministicAndValid) {
     const Catalog catalog = Catalog::load(SPLENDOR_GAME_CATALOG);
     constexpr std::uint32_t max_game_plies = 180;
-    const State first = initial_state(catalog, max_game_plies, 1234);
-    EXPECT_EQ(first, initial_state(catalog, max_game_plies, 1234));
+    const State first = initial_state(catalog, 2, max_game_plies, 1234);
+    EXPECT_EQ(first, initial_state(catalog, 2, max_game_plies, 1234));
     EXPECT_EQ(first.unknown_card_ids.size(), 78U);
     EXPECT_TRUE(validate_state(first, max_game_plies, catalog).valid);
 

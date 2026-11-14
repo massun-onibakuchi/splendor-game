@@ -41,42 +41,26 @@ cdef extern from "splendor/catalog.hpp" namespace "splendor":
         const string& payload_sha256()
 
 cdef extern from "splendor/episode.hpp" namespace "splendor":
-    cppclass TurnTerminal:
-        string reason
-        int winner_seat
-        vector[int] final_prestige
-    cppclass TurnTraceStep:
+    cppclass NativeTurnEpisode "splendor::TurnEpisode":
+        NativeTurnEpisode(const NativeCatalog&, uint8_t, uint32_t, uint64_t, uint64_t) except +
+        uint32_t max_game_plies()
+        uint8_t player_count()
+        uint32_t game_ply()
+        uint8_t current_player()
+        uint64_t decision_seed() except +
+        bint is_terminal()
+        void select(size_t) except +
+
+cdef extern from "splendor/replay.hpp" namespace "splendor":
+    cppclass RecordedStep:
         uint32_t game_ply
         uint8_t actor
         bint forced
         string action_key
-        string choice
         optional[uint8_t] refill_slot
         optional[uint16_t] refill_card
-        optional[uint8_t] blind_draw_tier
-    cppclass NativeTurnEpisode "splendor::TurnEpisode":
-        NativeTurnEpisode(const NativeCatalog&, uint32_t, uint64_t, uint64_t) except +
-        uint32_t max_game_plies()
-        string phase() except +
-        uint32_t game_ply()
-        uint8_t current_player()
-        uint64_t decision_seed() except +
-        vector[string] choices() except +
-        bint is_terminal()
-        TurnTerminal terminal() except +
-        TurnTerminal timeout_result(uint8_t) except +
-        optional[TurnTerminal] adjudicate_timeout(const GameClock&, double) except +
-        void select(const string&) except +
-        void select(size_t) except +
-        string observe(uint8_t) except +
-        string choice_details() except +
-        string token_takes() except +
-        vector[TurnTraceStep] drain_trace() except +
-
-cdef extern from "splendor/replay.hpp" namespace "splendor":
     cppclass TraceReplay:
-        TraceReplay(vector[TurnTraceStep]) except +
-        void verify(const vector[TurnTraceStep]&) except +
+        TraceReplay(vector[RecordedStep]) except +
         void finish() except +
 
 # A validated native time control: `kind` `turn` or `bank`, one allowance per seat.

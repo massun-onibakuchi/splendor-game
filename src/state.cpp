@@ -37,7 +37,7 @@ TierCounts tier_counts(const State& state, const Catalog& catalog) {
     TierCounts counts;
     for (const std::uint16_t id : state.unknown_card_ids) ++counts.unknown[catalog.card(id).tier - 1];
     counts.deck = counts.unknown;
-    for (const PlayerState& player : state.players) {
+    for (const PlayerState& player : seated(state)) {
         for (const auto& reserve : player.reserves) {
             if (!reserve || reserve->card_id) continue;
             std::size_t& deck = counts.deck[reserve->tier - 1];
@@ -55,15 +55,15 @@ bool knows_own_reserves(const State& state, const std::uint8_t seat) noexcept {
 }
 
 bool omniscient(const State& state) noexcept {
-    for (std::uint8_t seat = 0; seat < kPlayerCount; ++seat) {
+    for (std::uint8_t seat = 0; seat < state.player_count; ++seat) {
         if (!knows_own_reserves(state, seat)) return false;
     }
     return true;
 }
 
 bool observed_by(const State& state, const std::uint8_t observer) noexcept {
-    if (observer >= kPlayerCount || !knows_own_reserves(state, observer)) return false;
-    for (std::uint8_t seat = 0; seat < kPlayerCount; ++seat) {
+    if (observer >= state.player_count || !knows_own_reserves(state, observer)) return false;
+    for (std::uint8_t seat = 0; seat < state.player_count; ++seat) {
         if (seat == observer) continue;
         for (const auto& reserve : state.players[seat].reserves) {
             if (reserve && reserve->concealed && reserve->card_id) return false;
@@ -73,13 +73,13 @@ bool observed_by(const State& state, const std::uint8_t observer) noexcept {
 }
 
 State observe(const State& state, const std::uint8_t observer) {
-    if (observer >= kPlayerCount) throw std::invalid_argument("observer seat is out of range");
+    if (observer >= state.player_count) throw std::invalid_argument("observer seat is out of range");
     if (!knows_own_reserves(state, observer)) {
         throw std::invalid_argument("state does not carry the observer's own reserve identities");
     }
     State view = state;
     bool widened = false;
-    for (std::uint8_t seat = 0; seat < kPlayerCount; ++seat) {
+    for (std::uint8_t seat = 0; seat < state.player_count; ++seat) {
         if (seat == observer) continue;
         for (auto& reserve : view.players[seat].reserves) {
             if (!reserve || !reserve->concealed || !reserve->card_id) continue;
@@ -100,22 +100,28 @@ ValidationResult validate_state(
     const StateBoundary boundary) {
     const bool intermediate = boundary == StateBoundary::Intermediate;
     if (max_game_plies == 0) return invalid("max_game_plies must be positive");
-    if (state.current_player >= kPlayerCount || state.starting_player >= kPlayerCount) {
+    if (!supported_player_count(state.player_count)) return invalid("player count is unsupported");
+    const std::uint8_t seats = state.player_count;
+    if (state.current_player >= seats || state.starting_player >= seats) {
         return invalid("player index is out of range");
     }
-    if (state.current_player
-        != (state.starting_player + state.game_ply) % kPlayerCount) {
+    if (state.current_player != (state.starting_player + state.game_ply) % seats) {
         return invalid("current player does not match starting player and game ply");
     }
     if (state.endgame_triggered != state.endgame_trigger_player.has_value()) {
         return invalid("endgame trigger presence is inconsistent");
     }
-    if (state.endgame_trigger_player && *state.endgame_trigger_player >= kPlayerCount) {
+    if (state.endgame_trigger_player && *state.endgame_trigger_player >= seats) {
         return invalid("endgame trigger player is out of range");
     }
     if (state.endgame_trigger_player
         && state.players[*state.endgame_trigger_player].prestige < kTargetPrestige) {
         return invalid("endgame trigger player has insufficient prestige");
+    }
+    if (std::any_of(state.players.begin() + seats, state.players.end(), [](const PlayerState& player) {
+            return player != PlayerState{};
+        })) {
+        return invalid("an unseated player holds game material");
     }
     if (!intermediate && !state.endgame_triggered
         && std::any_of(state.players.begin(), state.players.end(), [](const PlayerState& player) {
@@ -162,7 +168,7 @@ ValidationResult validate_state(
     std::size_t claimed_nobles = 0;
     // Concealed reserves without an identity, per tier: their cards are in the unknown set.
     std::array<std::size_t, kTierCount> concealed_counts{};
-    for (std::size_t seat = 0; seat < state.players.size(); ++seat) {
+    for (std::size_t seat = 0; seat < seats; ++seat) {
         const PlayerState& player = state.players[seat];
         if (token_count(player) > (intermediate && seat == state.current_player ? 13U : 10U)) {
             return invalid("player exceeds the token limit");
@@ -203,6 +209,11 @@ ValidationResult validate_state(
         }
     }
 
+    const std::size_t nobles = visible_noble_count(seats);
+    if (std::any_of(state.noble_ids.begin() + static_cast<std::ptrdiff_t>(nobles), state.noble_ids.end(),
+            [](const auto& id) { return id.has_value(); })) {
+        return invalid("a noble lies past the seat count's visible slots");
+    }
     std::array<bool, kNobleCount> seen_nobles{};
     std::size_t visible_nobles = 0;
     for (const auto id : state.noble_ids) {
@@ -212,15 +223,15 @@ ValidationResult validate_state(
         seen_nobles[*id] = true;
         ++visible_nobles;
     }
-    if (visible_nobles + claimed_nobles != kVisibleNobleCount) {
+    if (visible_nobles + claimed_nobles != nobles) {
         return invalid("noble conservation failed");
     }
 
     for (std::size_t color = 0; color < kTokenColorCount; ++color) {
         const std::size_t supply =
-            color == static_cast<std::size_t>(Color::Gold) ? kGoldSupply : kGemSupply;
+            color == static_cast<std::size_t>(Color::Gold) ? kGoldSupply : gem_supply(seats);
         std::size_t total = state.bank_tokens[color];
-        for (const PlayerState& player : state.players) total += player.tokens[color];
+        for (const PlayerState& player : seated(state)) total += player.tokens[color];
         if (total != supply) return invalid("token conservation failed");
     }
     for (std::size_t tier = 0; tier < kTierCount; ++tier) {
@@ -238,15 +249,21 @@ ValidationResult validate_state(
 
 State initial_state(
     const Catalog& catalog,
+    const std::uint8_t player_count,
     const std::uint32_t max_game_plies,
     const std::uint64_t setup_seed) {
+    if (!supported_player_count(player_count)) {
+        throw std::invalid_argument("player count is unsupported");
+    }
     if (max_game_plies == 0) {
         throw std::invalid_argument("max_game_plies must be positive");
     }
     State state;
+    state.player_count = player_count;
     state.current_player = 0;
     state.starting_player = 0;
-    state.bank_tokens = {kGemSupply, kGemSupply, kGemSupply, kGemSupply, kGemSupply, kGoldSupply};
+    const std::uint8_t gems = gem_supply(player_count);
+    state.bank_tokens = {gems, gems, gems, gems, gems, kGoldSupply};
 
     std::uint64_t counter = 0;
     for (std::uint8_t tier = 1; tier <= kTierCount; ++tier) {
@@ -271,7 +288,7 @@ State initial_state(
         const std::size_t other = random_counter(setup_seed, counter++) % (index + 1);
         std::swap(noble_ids[index], noble_ids[other]);
     }
-    for (std::size_t slot = 0; slot < kVisibleNobleCount; ++slot) {
+    for (std::size_t slot = 0; slot < visible_noble_count(player_count); ++slot) {
         state.noble_ids[slot] = noble_ids[slot];
     }
     if (const ValidationResult result = validate_state(

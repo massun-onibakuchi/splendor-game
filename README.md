@@ -1,6 +1,6 @@
 # splendor-game
 
-Native two-player Splendor for agents of any kind: a C++20 game engine with staged
+Native Splendor for two to four seats and agents of any kind: a C++20 game engine with staged
 decisions, legal-choice surfaces, chance, seat views, replay and match clocks; Python
 bindings; and a practical-play host for human-versus-agent matches.
 
@@ -12,7 +12,7 @@ Contracts live in [docs/specs](docs/specs/spec.md).
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
-./build/splendor_game_benchmark 3000      # uniform playouts: staged, recorded, atomic
+./build/splendor_game_benchmark 3000 1 2  # uniform playouts (games, seed, seats): staged, recorded, atomic
 
 uv sync
 uv run pytest
@@ -31,7 +31,8 @@ target_link_libraries(your_target PRIVATE splendor::game)
 
 `splendor/episode.hpp` is the recorded game a host drives; `splendor/turn.hpp`,
 `splendor/choice_columns.hpp` and `splendor/detail/*.hpp` are the surfaces and trusted
-fast paths batched producers and searches build on.
+fast paths batched producers and searches build on. `splendor::play` adds the JSON
+renderings hosts and boards share (`splendor/play/render.hpp`).
 
 Any catalog of the standard shape loads; its identity is its declared contract and payload
 digest. Every seed derives from the seed law, whose domain-separation tag is the build
@@ -44,7 +45,7 @@ published under another tag.
 ```python
 from splendor_game import Catalog, Episode, derive64
 
-episode = Episode(Catalog.standard(), 160, derive64(1, "setup"), derive64(1, "episode"))
+episode = Episode(Catalog.standard(), 2, 160, derive64(1, "setup"), derive64(1, "episode"))
 while not episode.is_terminal():
     table = episode.choice_table()          # typed columns, one row per legal choice
     episode.select_index(0)

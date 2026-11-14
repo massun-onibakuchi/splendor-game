@@ -33,10 +33,10 @@ ScoringFixture scoring_fixture(
     const std::uint32_t game_ply) {
     using namespace splendor;
     for (std::uint64_t seed = 0; seed < 100; ++seed) {
-        State state = initial_state(catalog, max_game_plies, seed);
+        State state = initial_state(catalog, 2, max_game_plies, seed);
         state.game_ply = game_ply;
         state.current_player = static_cast<std::uint8_t>(
-            (state.starting_player + game_ply) % kPlayerCount);
+            (state.starting_player + game_ply) % state.player_count);
         for (const auto card_id : state.market_card_ids) {
             if (!card_id) continue;
             const Card& card = catalog.card(*card_id);
@@ -80,7 +80,7 @@ TEST(CandidateTransitionTest, ValidatesCandidatesTransitionsAndChanceOutcomes) {
     const Catalog catalog = Catalog::load(
         SPLENDOR_GAME_CATALOG);
     constexpr std::uint32_t max_game_plies = 180;
-    const State state = initial_state(catalog, max_game_plies, 4321);
+    const State state = initial_state(catalog, 2, max_game_plies, 4321);
     const CandidateBatch batch = generate_candidates(state, max_game_plies, catalog);
     ASSERT_TRUE(!batch.rows.empty()) << "initial candidates";
     for (std::size_t index = 0; index < batch.rows.size(); ++index) {
@@ -167,7 +167,7 @@ TEST(CandidateTransitionTest, ValidatesCandidatesTransitionsAndChanceOutcomes) {
         << null_take->action_key;
 
     constexpr std::uint32_t short_game_max_game_plies = 1;
-    State short_game = initial_state(catalog, short_game_max_game_plies, 7);
+    State short_game = initial_state(catalog, 2, short_game_max_game_plies, 7);
     short_game.players[0].prestige = 1;
     const CandidateBatch short_batch = generate_candidates(
         short_game, short_game_max_game_plies, catalog);
@@ -179,7 +179,7 @@ TEST(CandidateTransitionTest, ValidatesCandidatesTransitionsAndChanceOutcomes) {
     ASSERT_TRUE(terminal.terminal.has_value()) << "max-game-plies terminal";
     ASSERT_TRUE(terminal.terminal->reason == TerminalReason::MaxGamePlies)
         << "terminal reason";
-    ASSERT_TRUE(!terminal.terminal->winner_seat)
+    ASSERT_EQ(terminal.terminal->winners, 0)
         << "max-game-plies is a neutral truncation";
     ASSERT_TRUE(terminal.terminal->final_prestige[0] == 1)
         << "max-game-plies retains final evidence";
@@ -195,7 +195,7 @@ TEST(CandidateTransitionTest, ValidatesCandidatesTransitionsAndChanceOutcomes) {
     ASSERT_TRUE(incomplete_terminal.terminal.has_value());
     ASSERT_TRUE(incomplete_terminal.terminal->reason == TerminalReason::MaxGamePlies)
         << "reaching target without equal turns remains a max-ply truncation";
-    ASSERT_TRUE(!incomplete_terminal.terminal->winner_seat)
+    ASSERT_EQ(incomplete_terminal.terminal->winners, 0)
         << "incomplete-round max-ply truncation remains neutral";
 
     constexpr std::uint32_t complete_round_max_game_plies = 2;
@@ -211,6 +211,6 @@ TEST(CandidateTransitionTest, ValidatesCandidatesTransitionsAndChanceOutcomes) {
     ASSERT_TRUE(
         ordinary_terminal.terminal->reason == TerminalReason::TargetScoreEqualTurns)
         << "ordinary equal-turn termination takes precedence at the ply limit";
-    ASSERT_TRUE(ordinary_terminal.terminal->winner_seat == expected_winner)
+    ASSERT_TRUE(sole_winner(ordinary_terminal.terminal->winners) == expected_winner)
         << "ordinary adjudication still selects the winner";
 }

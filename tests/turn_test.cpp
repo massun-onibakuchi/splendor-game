@@ -48,7 +48,7 @@ State advanced_state(
     const std::uint64_t setup_seed,
     const std::size_t decisions,
     const CandidateFamily preferred = CandidateFamily::ReserveVisible) {
-    State state = splendor::initial_state(catalog, kMaxGamePlies, setup_seed);
+    State state = splendor::initial_state(catalog, 2, kMaxGamePlies, setup_seed);
     for (std::size_t decision = 0; decision < decisions; ++decision) {
         const CandidateBatch candidates =
             splendor::generate_candidates(state, kMaxGamePlies, catalog);
@@ -65,7 +65,7 @@ State advanced_state(
 
 // Ten held tokens and gold in the bank: a visible reserve overflows by its gold.
 State ten_token_reserve_state(const Catalog& catalog) {
-    State root = splendor::initial_state(catalog, kMaxGamePlies, 5);
+    State root = splendor::initial_state(catalog, 2, kMaxGamePlies, 5);
     splendor::PlayerState& actor = root.players[root.current_player];
     for (std::size_t color = 0; color < splendor::kGemColorCount; ++color) {
         actor.tokens[color] = 2;
@@ -78,7 +78,7 @@ State ten_token_reserve_state(const Catalog& catalog) {
 // is the opponent's. `purchased` deck cards leave the inventory to conserve cards.
 State noble_ready_root(
     const Catalog& catalog, const std::size_t eligible, const std::uint64_t setup_seed = 5) {
-    State root = splendor::initial_state(catalog, kMaxGamePlies, setup_seed);
+    State root = splendor::initial_state(catalog, 2, kMaxGamePlies, setup_seed);
     splendor::PlayerState& actor = root.players[root.current_player];
     std::size_t purchased = 0;
     for (std::size_t color = 0; color < splendor::kGemColorCount; ++color) {
@@ -318,7 +318,7 @@ TEST(StagedTurn, TakesAreTheGainGiveNormalFormOfOfficialTraces) {
     TokenCounts hand{};
     const std::function<void(std::size_t, int)> hands = [&](const std::size_t color, const int left) {
         if (color < splendor::kTokenColorCount) {
-            const int most = color == kGoldIndex ? splendor::kGoldSupply : splendor::kGemSupply;
+            const int most = color == kGoldIndex ? splendor::kGoldSupply : splendor::gem_supply(2);
             for (hand[color] = 0; hand[color] <= std::min(most, left); ++hand[color]) {
                 hands(color + 1, left - hand[color]);
             }
@@ -336,7 +336,7 @@ TEST(StagedTurn, TakesAreTheGainGiveNormalFormOfOfficialTraces) {
         const std::function<void(std::size_t)> banks = [&](const std::size_t gem) {
             if (gem < splendor::kGemColorCount) {
                 for (const int count : {0, 1, 4}) {
-                    if (hand[gem] + count > splendor::kGemSupply) continue;
+                    if (hand[gem] + count > splendor::gem_supply(2)) continue;
                     pile[gem] = count;
                     banks(gem + 1);
                 }
@@ -397,7 +397,7 @@ TEST(StagedTurn, ActionTreeGroupsGainsAndPurchasesByIntent) {
     using splendor::ActionFamily;
     using splendor::ActionNode;
     const Catalog catalog = load_catalog();
-    State state = splendor::initial_state(catalog, kMaxGamePlies, 5);
+    State state = splendor::initial_state(catalog, 2, kMaxGamePlies, 5);
     splendor::PlayerState& actor = state.players[state.current_player];
     // Ten tokens, three of them gold: smaller gains, the null and gold substitutions.
     for (std::size_t color = 0; color < splendor::kTokenColorCount; ++color) {
@@ -530,7 +530,7 @@ TEST(StagedTurn, MainExposesTheEligibleNobleSetAtEveryCardinality) {
         for (const CandidateFamily family :
              {CandidateFamily::Take, CandidateFamily::ReserveVisible}) {
             const TurnChoice& main = find_main(mains, family);
-            EXPECT_EQ(main.eligible_noble_slots.size(), eligible);
+            EXPECT_EQ(static_cast<std::size_t>(std::popcount(main.eligible_nobles)), eligible);
             EXPECT_FALSE(main.primary.chosen_noble_slot.has_value());
         }
         EXPECT_GT(expect_atomic_conformance(state, catalog), 0U);
@@ -698,13 +698,13 @@ TEST(StagedTurn, EndingTurnKeepsItsDiscretionaryCleanup) {
 // public refill of an ending turn stays undrawn. Both the equal-turn ending and the cap.
 TEST(StagedTurn, EndingBlindReservationStillDrawsForItsOwner) {
     const Catalog catalog = load_catalog();
-    State closing = splendor::initial_state(catalog, kMaxGamePlies, 11);
+    State closing = splendor::initial_state(catalog, 2, kMaxGamePlies, 11);
     closing.game_ply = 1;
     closing.current_player = static_cast<std::uint8_t>(1 - closing.starting_player);
     closing.endgame_triggered = true;
     closing.endgame_trigger_player = closing.starting_player;
     closing.players[closing.starting_player].prestige = 15;
-    State capped = splendor::initial_state(catalog, 2, 11);
+    State capped = splendor::initial_state(catalog, 2, 2, 11);
     capped.game_ply = 1;
     capped.current_player = static_cast<std::uint8_t>(1 - capped.starting_player);
     for (const auto& [state, plies] : {std::pair{closing, kMaxGamePlies}, std::pair{capped, 2U}}) {
@@ -757,7 +757,7 @@ TEST(StagedTurn, WholeGamesPlayToTerminalThroughStagedDecisions) {
     std::size_t target_endings = 0;
     std::size_t cleanup_decisions = 0;
     for (const std::uint64_t seed : {3U, 17U, 29U, 41U}) {
-        Decision decision = main_decision(splendor::initial_state(catalog, kMaxGamePlies, seed));
+        Decision decision = main_decision(splendor::initial_state(catalog, 2, kMaxGamePlies, seed));
         const splendor::detail::EpisodeSeeds seeds(seed);
         std::optional<splendor::TerminalFacts> terminal;
         for (std::uint32_t step = 0; step < 4 * kMaxGamePlies && !terminal; ++step) {

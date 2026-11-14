@@ -18,8 +18,8 @@ Native Splendor engine (`include/`, `src/`, C++20), its Cython binding
 - **Fast paths stay native.** No Python object per choice or per state on any bulk path;
   expose buffers. Measure engine changes with `benchmarks/playout_benchmark.cpp`; a
   checksum change means play changed.
-- **Design for 2–4 players.** Two players are supported today; three and four are
-  planned. Shape rules, state, views and surfaces around that known change.
+- **Every seat count.** Games of two to four seats share one state layout and one API;
+  seat arithmetic reads the state's own count. Nothing assumes two seats.
 
 ## Docs
 

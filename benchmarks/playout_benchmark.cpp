@@ -4,8 +4,8 @@
 //   recorded  the recorded `TurnEpisode` a match host drives, its trace drained per choice
 //   atomic    the atomic adapter (`generate_candidates`, `detail::play_decision`)
 //
-// Usage: splendor_game_benchmark [games] [seed]. The checksum ties each surface's play to
-// its seed, so a change that alters play shows here before it shows in timings.
+// Usage: splendor_game_benchmark [games] [seed] [players]. The checksum ties each surface's
+// play to its seed, so a change that alters play shows here before it shows in timings.
 
 #include "splendor/candidate.hpp"
 #include "splendor/catalog.hpp"
@@ -39,17 +39,23 @@ std::uint64_t pick(const std::uint64_t seed, const std::size_t count) {
 }
 
 std::uint64_t score(const TerminalFacts& terminal) {
-    return terminal.final_prestige[0] * 31U + terminal.final_prestige[1];
+    std::uint64_t value = 0;
+    for (std::size_t seat = 0; seat < terminal.player_count; ++seat) {
+        value = value * 31U + terminal.final_prestige[seat];
+    }
+    return value;
 }
 
-Totals staged(const Catalog& catalog, const std::uint64_t games, const std::uint64_t seed) {
+Totals staged(
+    const Catalog& catalog, const std::uint8_t players, const std::uint64_t games,
+    const std::uint64_t seed) {
     Totals totals;
     std::vector<TurnChoice> choices;
     const auto start = Clock::now();
     for (std::uint64_t game = 0; game < games; ++game) {
         const std::array<std::uint64_t, 1> coordinate{game};
         const detail::EpisodeSeeds seeds(derive64(seed, "benchmark-episode", coordinate));
-        Decision decision{initial_state(catalog, kMaxGamePlies, derive64(seed, "benchmark-setup", coordinate)),
+        Decision decision{initial_state(catalog, players, kMaxGamePlies, derive64(seed, "benchmark-setup", coordinate)),
                           DecisionPhase::Main};
         for (;;) {
             std::optional<TerminalFacts> terminal =
@@ -69,34 +75,36 @@ Totals staged(const Catalog& catalog, const std::uint64_t games, const std::uint
     return totals;
 }
 
-Totals recorded(const Catalog& catalog, const std::uint64_t games, const std::uint64_t seed) {
+Totals recorded(
+    const Catalog& catalog, const std::uint8_t players, const std::uint64_t games,
+    const std::uint64_t seed) {
     Totals totals;
     const auto start = Clock::now();
     for (std::uint64_t game = 0; game < games; ++game) {
         const std::array<std::uint64_t, 1> coordinate{game};
         TurnEpisode episode(
-            catalog, kMaxGamePlies, derive64(seed, "benchmark-setup", coordinate),
+            catalog, players, kMaxGamePlies, derive64(seed, "benchmark-setup", coordinate),
             derive64(seed, "benchmark-episode", coordinate));
         while (!episode.is_terminal()) {
             episode.select(pick(episode.decision_seed(), episode.legal_choices().size()));
             episode.drain_trace();
             ++totals.decisions;
         }
-        const TurnTerminal terminal = episode.terminal();
-        totals.checksum += static_cast<std::uint64_t>(terminal.final_prestige[0]) * 31U
-            + static_cast<std::uint64_t>(terminal.final_prestige[1]);
+        totals.checksum += score(*episode.terminal());
     }
     totals.seconds = std::chrono::duration<double>(Clock::now() - start).count();
     return totals;
 }
 
-Totals atomic(const Catalog& catalog, const std::uint64_t games, const std::uint64_t seed) {
+Totals atomic(
+    const Catalog& catalog, const std::uint8_t players, const std::uint64_t games,
+    const std::uint64_t seed) {
     Totals totals;
     const auto start = Clock::now();
     for (std::uint64_t game = 0; game < games; ++game) {
         const std::array<std::uint64_t, 1> coordinate{game};
         const detail::EpisodeSeeds seeds(derive64(seed, "benchmark-episode", coordinate));
-        State state = initial_state(catalog, kMaxGamePlies, derive64(seed, "benchmark-setup", coordinate));
+        State state = initial_state(catalog, players, kMaxGamePlies, derive64(seed, "benchmark-setup", coordinate));
         std::uint32_t ordinal = 0;
         for (;;) {
             const CandidateBatch leaves = generate_candidates(state, kMaxGamePlies, catalog);
@@ -129,9 +137,11 @@ void report(const char* name, const std::uint64_t games, const Totals& totals) {
 int main(const int argc, char** argv) {
     const std::uint64_t games = argc > 1 ? std::strtoull(argv[1], nullptr, 10) : 2000;
     const std::uint64_t seed = argc > 2 ? std::strtoull(argv[2], nullptr, 10) : 1;
+    const auto players =
+        static_cast<std::uint8_t>(argc > 3 ? std::strtoul(argv[3], nullptr, 10) : 2);
     const Catalog catalog = Catalog::load(SPLENDOR_GAME_CATALOG);
-    report("staged", games, staged(catalog, games, seed));
-    report("recorded", games, recorded(catalog, games, seed));
-    report("atomic", games, atomic(catalog, games, seed));
+    report("staged", games, staged(catalog, players, games, seed));
+    report("recorded", games, recorded(catalog, players, games, seed));
+    report("atomic", games, atomic(catalog, players, games, seed));
     return 0;
 }

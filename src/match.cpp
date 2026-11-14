@@ -17,16 +17,17 @@ MatchResult match_result(const TerminalFacts& terminal) {
     return {
         terminal.reason == TerminalReason::TargetScoreEqualTurns
             ? MatchTermination::TargetScoreEqualTurns : MatchTermination::MaxGamePlies,
-        terminal.winner_seat, terminal.final_prestige, terminal.purchased_cards, std::nullopt};
+        terminal.player_count, terminal.winners, terminal.final_prestige,
+        terminal.purchased_cards, std::nullopt};
 }
 
 MatchResult timeout_result(const State& state, const std::uint8_t loser) {
-    if (loser >= state.players.size()) throw std::invalid_argument("timeout seat is out of range");
-    // Two-player adjudication, not a container-size assumption. Multiplayer forfeits
-    // need their own outcome law when the game adds multiplayer support.
-    static_assert(kPlayerCount == 2);
-    MatchResult result{MatchTermination::Timeout, next_seat(loser), {}, {}, loser};
-    for (std::size_t seat = 0; seat < state.players.size(); ++seat) {
+    if (loser >= state.player_count) throw std::invalid_argument("timeout seat is out of range");
+    const auto seated = static_cast<SeatMask>((1U << state.player_count) - 1);
+    MatchResult result{
+        MatchTermination::Timeout, state.player_count,
+        static_cast<SeatMask>(seated & ~(1U << loser)), {}, {}, loser};
+    for (std::size_t seat = 0; seat < state.player_count; ++seat) {
         result.final_prestige[seat] = state.players[seat].prestige;
         result.purchased_cards[seat] = state.players[seat].purchased_cards;
     }

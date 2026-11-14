@@ -301,7 +301,7 @@ def _steps_from_keys(log: dict, keys: list[str], model_seat: int) -> list[dict]:
     full model report on every model decision (the archive form)."""
     catalog = load_catalog_view(STANDARD_CATALOG)
     episode = Episode(
-        Catalog.standard(), log["max_game_plies"], int(log["setup_seed"]), int(log["episode_seed"])
+        Catalog.standard(), 2, log["max_game_plies"], int(log["setup_seed"]), int(log["episode_seed"])
     )
     steps: list[dict] = []
     for history_index, key in enumerate(keys, start=1):

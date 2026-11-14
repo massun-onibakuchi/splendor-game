@@ -31,7 +31,9 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: Benchmark smoke
-        run: ./build/splendor_game_benchmark 200
+        run: |
+          ./build/splendor_game_benchmark 200 1 2
+          ./build/splendor_game_benchmark 100 1 4
       - name: Install the CMake package
         run: cmake --install build --prefix "$RUNNER_TEMP/splendor-game"
       - name: Consume the installed package
@@ -43,16 +45,17 @@ jobs:
           project(consumer LANGUAGES CXX)
           find_package(SplendorGame CONFIG REQUIRED)
           add_executable(consumer main.cpp)
-          target_link_libraries(consumer PRIVATE splendor::game)
+          target_link_libraries(consumer PRIVATE splendor::play)
           target_compile_definitions(consumer PRIVATE CATALOG="${SplendorGame_CATALOG}")
           EOF
           cat > "$consumer/main.cpp" <<'EOF'
           #include "splendor/episode.hpp"
+          #include "splendor/play/render.hpp"
           int main() {
               const splendor::Catalog catalog = splendor::Catalog::load(CATALOG);
-              splendor::TurnEpisode episode(catalog, 160, 1, 2);
+              splendor::TurnEpisode episode(catalog, 3, 160, 1, 2);
               while (!episode.is_terminal()) episode.select(std::size_t{0});
-              return 0;
+              return splendor::play::board_json(episode.view(0), catalog, episode.terminal()).empty();
           }
           EOF
           cmake -S "$consumer" -B "$consumer/build" -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/splendor-game"

@@ -49,6 +49,14 @@ target_include_directories(splendor_game
   PRIVATE "${PROJECT_SOURCE_DIR}/third_party")
 target_compile_options(splendor_game PRIVATE -Wall -Wextra -Wpedantic)
 
+# Hosts and boards: presentation over the game library. The game library itself has no
+# JSON and no host.
+add_library(splendor_play src/play/render.cpp)
+add_library(splendor::play ALIAS splendor_play)
+set_target_properties(splendor_play PROPERTIES EXPORT_NAME play)
+target_link_libraries(splendor_play PUBLIC splendor_game)
+target_compile_options(splendor_play PRIVATE -Wall -Wextra -Wpedantic)
+
 # The standard catalog that every consumer loads: in this source tree, or installed
 # beside the package (`SplendorGame_CATALOG` after `find_package`).
 set(SPLENDOR_GAME_CATALOG "${PROJECT_SOURCE_DIR}/data/standard-catalog-v1/catalog.json"
@@ -57,7 +65,7 @@ set(SPLENDOR_GAME_CATALOG "${PROJECT_SOURCE_DIR}/data/standard-catalog-v1/catalo
 if(SPLENDOR_GAME_INSTALL)
   include(CMakePackageConfigHelpers)
   set(SPLENDOR_GAME_DATADIR "${CMAKE_INSTALL_DATADIR}/splendor-game")
-  install(TARGETS splendor_game EXPORT SplendorGameTargets
+  install(TARGETS splendor_game splendor_play EXPORT SplendorGameTargets
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
@@ -101,6 +109,7 @@ add_executable(splendor_game_tests
   tests/catalog_seed_state_test.cpp
   tests/clock_test.cpp
   tests/match_test.cpp
+  tests/player_count_test.cpp
   tests/turn_test.cpp)
 target_link_libraries(splendor_game_tests PRIVATE splendor::game GTest::gtest_main)
 target_include_directories(splendor_game_tests PRIVATE "${PROJECT_SOURCE_DIR}/third_party")

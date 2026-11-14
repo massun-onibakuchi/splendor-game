@@ -60,11 +60,7 @@ void write_choice_columns(const std::span<const TurnChoice> choices, ChoiceColum
         }
         out.reserve_slot[row] = field(primary.reserve_slot);
         out.card[row] = primary.target_card_id ? *primary.target_card_id : kNoChoiceCard;
-        std::uint8_t nobles = 0;
-        for (const std::uint8_t slot : choice.eligible_noble_slots) {
-            nobles = static_cast<std::uint8_t>(nobles | (1U << slot));
-        }
-        out.eligible_nobles[row] = nobles;
+        out.eligible_nobles[row] = choice.eligible_nobles;
     }
 }
 

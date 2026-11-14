@@ -122,10 +122,10 @@ struct TurnChoice {
     // payment. Never a later return or noble. Its own `action_key` stays empty:
     // `choice_key` names the choice.
     CandidateDescriptor primary;
-    // MAIN: every noble eligible once the primary's permanent bonus applies,
-    // carried-over eligibility included, in ascending slot order. A set of possible
-    // or forced consequences, never a selection.
-    std::vector<std::uint8_t> eligible_noble_slots;
+    // MAIN: the visible noble slots eligible once the primary's permanent bonus applies,
+    // carried-over eligibility included. A set of possible or forced consequences, never
+    // a selection.
+    SlotMask eligible_nobles{};
     // CLEANUP: the complete six-colour return and the claimed noble.
     std::array<std::uint8_t, kTokenColorCount> returned{};
     std::optional<std::uint8_t> noble_slot;
@@ -167,6 +167,9 @@ struct MainOutcome {
     std::vector<std::uint16_t> outcome_card_ids;
     // How many joint cleanups follow; the set does not depend on the drawn card.
     std::size_t cleanup_count{};
+    // The only cleanup when `cleanup_count` is one, which no decision exposes.
+    std::array<std::uint8_t, kTokenColorCount> forced_return{};
+    std::optional<std::uint8_t> forced_noble;
     // Set when the forced cleanup ends the game: the turn is adjudicated and `state` is
     // final up to the owed draw.
     std::optional<TerminalFacts> terminal;

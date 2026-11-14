@@ -7,7 +7,7 @@
 namespace splendor::detail {
 
 EpisodeSeeds::EpisodeSeeds(const std::uint64_t episode_seed) : episode_(episode_seed) {
-    for (std::uint8_t seat = 0; seat < kPlayerCount; ++seat) {
+    for (std::uint8_t seat = 0; seat < kMaxPlayers; ++seat) {
         const std::array<std::uint64_t, 1> coordinate{seat};
         policy_[seat] = derive64(episode_, "policy", coordinate);
     }

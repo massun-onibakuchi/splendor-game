@@ -12,10 +12,10 @@
 #include <vector>
 
 // One practical match between seats of any kind (docs/specs/play.md): each seat is a human,
-// who submits validated keys, or an agent, whose searches the host runs and whose selections
+// who submits validated keys, or an agent, whose jobs the host runs and whose selections
 // arrive as choice indexes. The match owns the game, its clock, turn order, the agents' job
 // schedule, analysis visibility, the log and its replay; a host language supplies wall and
-// monotonic time, runs agent searches and persists logs. It is not thread-safe: a host
+// monotonic time, runs agent jobs and persists logs. It is not thread-safe: a host
 // serializes every call.
 namespace splendor::play {
 
@@ -44,7 +44,10 @@ struct MatchHost {
     std::vector<Actor> actors;
 };
 
-// One participant: a human, or an offered actor. A pondering agent searches while a human
+// `{log_contract, max_game_plies, conditions, actors: [{name, identity, summary}]}`.
+MatchHost parse_host(const Json& description);
+
+// One participant: a human, or an offered actor. A pondering agent runs while a human
 // seat decides.
 struct Seat {
     SeatKind kind{};
@@ -70,9 +73,9 @@ MatchSettings parse_settings(const Json& request, const MatchHost& host);
 enum class MatchStatus : std::uint8_t { Ready, Running, Paused, Finished };
 enum class JobKind : std::uint8_t { Move, Ponder, Review };
 
-// The search a host should be running: an agent's own move, its pondering of a human's
+// The job a host should be running: an agent's own move, its pondering of a human's
 // decision, or a finished game's analysis of a reviewed position. `root_actor` is the
-// searched decision's actor; `concealed` says that actor held a card another seat could not
+// job's decision's actor; `concealed` says that actor held a card another seat could not
 // identify, so the report is that seat's knowledge alone.
 struct Job {
     std::uint64_t id{};
@@ -101,23 +104,25 @@ public:
     void start(double now_ms);
     void pause(double now_ms);
     void resume(double now_ms);
-    // Stops any search and freezes the clock, adjudicating expiry first.
+    // Stops any job and freezes the clock, adjudicating expiry first.
     void close(double now_ms);
     // The acting human's complete decision, composed at `revision`.
     void play(std::string_view action_key, std::uint64_t revision, double now_ms);
-    // Searches a finished game's reviewed position; none stops the analysis.
+    // Analyzes a finished game's reviewed position; none stops the analysis.
     void analyze(std::optional<std::size_t> position);
 
-    // The search the host should run, if any, and the episode it searches: shared, so a
+    // The job the host should run, if any, and the episode it runs on: shared, so a
     // holder keeps a review position's episode after the next analysis replaces it.
     const std::optional<Job>& job() const noexcept { return job_; }
     std::shared_ptr<const TurnEpisode> job_episode() const;
-    // One slice of a search: its JSON report object and the simulations it completed.
+    // One slice of a job: its JSON report object and the simulations it completed.
     void publish(std::uint64_t job, std::string_view report, std::uint64_t simulations);
-    // A ponder or review search ended without a selection.
+    // A ponder or review job ended without a selection.
     void finish(std::uint64_t job, double now_ms);
-    // A move search's selection, an index into the pending decision's legal choices.
-    void play_agent(std::uint64_t job, std::size_t choice, std::string_view report, double now_ms);
+    // A move job's selection, an index into the pending decision's legal choices, with its
+    // report, if any.
+    void play_agent(
+        std::uint64_t job, std::size_t choice, std::optional<std::string_view> report, double now_ms);
     void fail(std::uint64_t job, std::string_view error, double now_ms);
 
     // The board's state as seat `perspective` may see it; with `since` equal to the current

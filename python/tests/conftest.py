@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
 
 from splendor_game import STANDARD_CATALOG, Clock, Episode
-from splendor_play import MATCH_LOG_SCHEMA, Archive, SearchJob, make_server
+from splendor_play import MATCH_LOG_SCHEMA, Archive, Job, Move, Publish, make_server
 
 MAX_GAME_PLIES = 160
 # A scripted search's slices: a move ends once its budget passes, a review or a ponder
@@ -26,6 +26,7 @@ _SLICE_LIMIT = 40
 class Actor:
     label: str
     identity: str
+    reports: bool = True
 
     def summary(self) -> dict[str, Any]:
         return {"label": self.label, "identity": self.identity}
@@ -39,70 +40,58 @@ class Setup:
     conditions: Mapping[str, Any] = field(default_factory=lambda: {"search": "scripted"})
 
 
-class _Budget:
-    """Ends a move's search once its fixed budget has passed."""
+class _Thought:
+    """Selects the decision's first legal choice: at once when silent, else after a sliced,
+    reported 'search'."""
 
-    def __init__(self) -> None:
+    def __init__(self, job: Job, keys: tuple[str, ...], reports: bool) -> None:
+        self._job = job
+        self._keys = keys
+        self._reports = reports
         self._deadline = time.monotonic() + _MOVE_SECONDS
 
-    def end(self) -> str | None:
-        return "budget" if time.monotonic() >= self._deadline else None
-
-
-class ScriptedAgent:
-    """Selects a decision's first legal choice after a sliced, reported 'search'."""
-
-    def __init__(self, actor: Actor, seat: int) -> None:
-        self.actor = actor
-        self.seat = seat
-        self._selection: tuple[int, str, tuple[str, ...]] | None = None
-
-    @staticmethod
-    def _decision(episode: Episode) -> tuple[int, str, tuple[str, ...]]:
-        return episode.game_ply(), episode.phase(), episode.choices()
-
-    def warm(self, episode: Episode) -> None:
-        pass
-
-    def root(self, episode: Episode) -> object:
-        return self._decision(episode)
-
-    def timer(self, clock: Clock, now_ms: float) -> _Budget:
-        return _Budget()
-
-    def search(self, job: SearchJob, root: object, publish: Callable[[str, int], None]) -> str:
-        _, _, keys = root
+    def run(self, publish: Publish) -> Move | None:
+        move = self._job.kind == "move"
+        if not self._reports:
+            return Move(0) if move else None
         slices = 0
         while True:
             time.sleep(_SLICE_SECONDS)
             slices += 1
             report = json.dumps({
-                "selected_key": keys[0],
+                "selected_key": self._keys[0],
                 "root_value": 0.25,
                 "root_visits": slices,
                 "top_candidates": [
                     {"action_key": key, "visits": slices if index == 0 else 0}
-                    for index, key in enumerate(keys[:3])
+                    for index, key in enumerate(self._keys[:3])
                 ],
             })
             publish(report, 1)
-            ended = job.timer is not None and job.timer.end() is not None
-            if job.done.is_set() or ended or slices >= _SLICE_LIMIT:
-                self._selection = root
-                return report
+            spent = move and time.monotonic() >= self._deadline
+            if self._job.ended or spent or slices >= _SLICE_LIMIT:
+                return Move(0, report) if move else None
 
-    def selection(self, episode: Episode) -> int:
-        if self._selection is None or self._selection != self._decision(episode):
-            raise ValueError("the selection belongs to another decision")
-        return 0
+
+class ScriptedAgent:
+    def __init__(self, actor: Actor, seat: int) -> None:
+        self.actor = actor
+        self.seat = seat
+
+    def warm(self, episode: Episode) -> None:
+        pass
+
+    def start(self, job: Job, episode: Episode, clock: Clock, now_ms: float) -> _Thought:
+        return _Thought(job, episode.choices(), self.actor.reports)
 
 
 ACTOR = Actor("Scripted @1", "scripted-v1")
+SILENT = Actor("Silent @1", "silent-v1", reports=False)
 
 
 def _server(archive, static, max_game_plies: int):
     server = make_server(
-        Setup((ACTOR,), max_game_plies=max_game_plies), ScriptedAgent, static=static,
+        Setup((ACTOR, SILENT), max_game_plies=max_game_plies), ScriptedAgent, static=static,
         catalog_path=STANDARD_CATALOG, archive=Archive(archive, log_contract=MATCH_LOG_SCHEMA),
         host="127.0.0.1", port=0,
     )

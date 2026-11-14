@@ -815,9 +815,6 @@ std::optional<OwedDraw> apply_primary_effect(
     State& state,
     const Catalog& catalog,
     const CandidateDescriptor& primary) {
-    if (primary.chosen_noble_slot) {
-        throw std::logic_error("a primary effect carries no noble");
-    }
     const std::uint8_t seat = state.current_player;
     apply_token_delta(state, seat, primary.token_delta);
     PlayerState& player = state.players[seat];

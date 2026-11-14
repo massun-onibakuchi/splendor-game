@@ -2,6 +2,7 @@
 
 #include "splendor/seed.hpp"
 #include "splendor/detail/transition.hpp"
+#include "splendor/detail/turn.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -170,80 +171,22 @@ TransitionResult apply_generated_candidate(
     const std::uint32_t max_game_plies,
     const Catalog& catalog,
     const CandidateDescriptor& candidate) {
-    State next = state;
-    const std::uint8_t acting_seat = state.current_player;
-    PlayerState& player = next.players[acting_seat];
-    apply_token_delta(next, acting_seat, candidate.token_delta);
-
-    std::optional<std::uint8_t> opened_tier;
-    std::optional<std::uint8_t> opened_slot;
-    switch (candidate.family) {
-        case CandidateFamily::Take:
-        case CandidateFamily::PassForced:
-            break;
-        case CandidateFamily::ReserveBlind:
-            // A leaf fixes its return before any draw; a blind reservation's return is
-            // chosen after its owner sees the card, so no leaf blind reserves.
-            throw std::invalid_argument("a blind reservation is not a complete effective leaf");
-        case CandidateFamily::ReserveVisible: {
-            const std::size_t index = market_index(*candidate.source_tier, *candidate.source_slot);
-            if (next.market_card_ids[index] != candidate.target_card_id) {
-                throw std::logic_error("reserve target changed");
-            }
-            const auto destination = first_empty_reserve(player);
-            if (!destination) throw std::logic_error("reserve capacity exhausted");
-            player.reserves[*destination] =
-                Reserve{*candidate.source_tier, candidate.target_card_id, false};
-            next.market_card_ids[index].reset();
-            opened_tier = candidate.source_tier;
-            opened_slot = candidate.source_slot;
-            break;
-        }
-        case CandidateFamily::BuyVisible:
-        case CandidateFamily::BuyReserved: {
-            apply_payment(next, acting_seat, candidate.payment);
-            if (candidate.family == CandidateFamily::BuyVisible) {
-                const std::size_t index = market_index(
-                    *candidate.source_tier, *candidate.source_slot);
-                if (next.market_card_ids[index] != candidate.target_card_id) {
-                    throw std::logic_error("visible buy target changed");
-                }
-                next.market_card_ids[index].reset();
-                opened_tier = candidate.source_tier;
-                opened_slot = candidate.source_slot;
-            } else {
-                if (candidate.reserve_owner != acting_seat
-                    || !player.reserves[*candidate.reserve_slot]
-                    || player.reserves[*candidate.reserve_slot]->card_id
-                        != candidate.target_card_id) {
-                    throw std::logic_error("reserved buy target changed");
-                }
-                player.reserves[*candidate.reserve_slot].reset();
-            }
-            const Card& card = catalog.card(*candidate.target_card_id);
-            ++player.bonuses[static_cast<std::size_t>(card.bonus)];
-            player.prestige += card.prestige;
-            ++player.purchased_cards;
-            break;
-        }
+    // A leaf fixes its return before any draw; a blind reservation's return is chosen
+    // after its owner sees the card, so no leaf blind reserves.
+    if (candidate.family == CandidateFamily::ReserveBlind) {
+        throw std::invalid_argument("a blind reservation is not a complete effective leaf");
     }
-
-    claim_noble(next, catalog, acting_seat, candidate.chosen_noble_slot);
-    if (!next.endgame_triggered && player.prestige >= kTargetPrestige) {
-        next.endgame_triggered = true;
-        next.endgame_trigger_player = acting_seat;
-    }
-    ++next.game_ply;
-    next.current_player = static_cast<std::uint8_t>(
-        (next.starting_player + next.game_ply) % next.player_count);
-
+    // The staged turn's own effects, the leaf's precommitted return and noble included:
+    // a leaf and the staged path it realizes are one implementation.
     TransitionResult result;
-    result.state = std::move(next);
-    result.terminal = terminal_facts(result.state, max_game_plies);
-    if (opened_tier && !result.terminal
-        && tier_counts(result.state, catalog).deck[*opened_tier - 1] != 0) {
-        result.refill_tier = opened_tier;
-        result.refill_market_slot = opened_slot;
+    result.state = state;
+    const std::uint8_t seat = state.current_player;
+    const std::optional<OwedDraw> owed = detail::apply_primary_effect(result.state, catalog, candidate);
+    claim_noble(result.state, catalog, seat, candidate.chosen_noble_slot);
+    result.terminal = detail::finish_turn_state(result.state, max_game_plies);
+    if (owed && !result.terminal) {
+        result.refill_tier = owed->tier;
+        result.refill_market_slot = owed->slot;
     }
     return result;
 }

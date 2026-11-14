@@ -35,11 +35,27 @@ std::span<const T> head(const std::array<T, N>& values, const std::size_t count)
     return {values.data(), count};
 }
 
+constexpr std::array<std::string_view, kTokenColorCount> kColorNames{
+    "white", "blue", "green", "red", "black", "gold"};
+
 std::string terminal_json(const TerminalFacts& terminal) {
     return "{\"reason\":\"" + std::string(match_termination_name(match_result(terminal).reason))
         + "\",\"winner_seat\":" + json(sole_winner(terminal.winners))
         + ",\"final_prestige\":" + json(head(terminal.final_prestige, terminal.player_count))
         + ",\"purchased_cards\":" + json(head(terminal.purchased_cards, terminal.player_count)) + '}';
+}
+
+// `count color` for each colour whose signed count is positive, or "nothing".
+template <typename T>
+std::string token_list(const std::array<T, kTokenColorCount>& counts, const int sign = 1) {
+    std::string out;
+    for (std::size_t color = 0; color < kTokenColorCount; ++color) {
+        const int count = sign * static_cast<int>(counts[color]);
+        if (count <= 0) continue;
+        if (!out.empty()) out += ", ";
+        out += std::to_string(count) + ' ' + std::string(kColorNames[color]);
+    }
+    return out.empty() ? "nothing" : out;
 }
 
 }  // namespace
@@ -147,6 +163,67 @@ std::string result_json(const MatchResult& result) {
     return "{\"reason\":\"" + std::string(match_termination_name(result.reason))
         + "\",\"winner_seat\":" + json(sole_winner(result.winners))
         + ",\"final_prestige\":" + json(head(result.final_prestige, result.player_count)) + '}';
+}
+
+std::string catalog_json(const Catalog& catalog) {
+    std::string out = "{\"cards\":[";
+    for (const Card& card : catalog.cards()) {
+        if (card.id) out += ',';
+        out += "{\"id\":" + json(card.id) + ",\"tier\":" + json(card.tier) + ",\"bonus\":\""
+            + std::string(kColorNames[static_cast<std::size_t>(card.bonus)]) + "\",\"prestige\":"
+            + json(card.prestige) + ",\"cost\":" + json(card.cost) + '}';
+    }
+    out += "],\"nobles\":[";
+    for (const Noble& noble : catalog.nobles()) {
+        if (noble.id) out += ',';
+        out += "{\"id\":" + json(noble.id) + ",\"prestige\":" + json(noble.prestige)
+            + ",\"requirements\":" + json(noble.requirements) + '}';
+    }
+    return out + "]}";
+}
+
+std::string choice_text(
+    const TurnChoice& choice,
+    const Catalog& catalog,
+    const std::span<const std::optional<std::uint16_t>> noble_ids) {
+    if (choice.phase == DecisionPhase::Cleanup) {
+        std::string out;
+        if (std::any_of(choice.returned.begin(), choice.returned.end(), [](auto count) { return count; })) {
+            out = "returned " + token_list(choice.returned);
+        }
+        if (choice.noble_slot && *choice.noble_slot < noble_ids.size() && noble_ids[*choice.noble_slot]) {
+            if (!out.empty()) out += "; ";
+            out += "claimed noble #" + std::to_string(*noble_ids[*choice.noble_slot]);
+        }
+        return out.empty() ? "ended the turn" : out;
+    }
+    const CandidateDescriptor& primary = choice.primary;
+    constexpr std::size_t kGold = static_cast<std::size_t>(Color::Gold);
+    const std::string gold = primary.token_delta[kGold] > 0 ? " +1 gold" : "";
+    switch (primary.family) {
+        case CandidateFamily::Take: {
+            if (is_null_take(primary)) return "took no tokens (the null move at ten tokens)";
+            const std::string returned = token_list(primary.token_delta, -1);
+            return "took " + token_list(primary.token_delta)
+                + (returned == "nothing" ? "" : " and returned " + returned);
+        }
+        case CandidateFamily::PassForced:
+            return "passed (no legal action)";
+        case CandidateFamily::ReserveBlind:
+            return "reserved a tier-" + std::to_string(*primary.source_tier) + " card from the deck" + gold;
+        case CandidateFamily::ReserveVisible:
+        case CandidateFamily::BuyVisible:
+        case CandidateFamily::BuyReserved:
+            break;
+    }
+    const Card& card = catalog.card(*primary.target_card_id);
+    const std::string label = "tier-" + std::to_string(card.tier) + ' '
+        + std::string(kColorNames[static_cast<std::size_t>(card.bonus)]) + " card #"
+        + std::to_string(card.id) + " (" + std::to_string(card.prestige) + " pt)";
+    if (primary.family == CandidateFamily::ReserveVisible) return "reserved " + label + gold;
+    return "bought " + label
+        + (primary.family == CandidateFamily::BuyReserved ? " from reserve" : " from market")
+        + " paying " + token_list(primary.payment);
 }
 
 }  // namespace splendor::play

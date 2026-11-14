@@ -1,8 +1,8 @@
-"""One live match: the native match host and the threads that run its agents' searches.
+"""One live match: the native match host and the threads that run its agents' jobs.
 
 `splendor::play::Match` owns the game, clocks, turn order, the agents' job schedule, analysis
 visibility, the log and its replay. This driver supplies wall and monotonic time, runs each
-scheduled search on its seat's agent, and persists every changed log.
+scheduled job on its seat's agent, and persists every changed log.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from splendor_game import Catalog
 from splendor_play._native import HostMatch
-from splendor_play.agents import Agent, AgentFactory, MatchSetup, SearchJob
+from splendor_play.agents import Agent, AgentFactory, Job, MatchSetup, Thought
 
 if TYPE_CHECKING:
     from splendor_play.archive import Archive
@@ -44,10 +44,10 @@ def host_json(setup: MatchSetup) -> str:
 
 
 class Match:
-    """Every method holds `_lock`. One search runs at a time: each search thread first joins
-    its predecessor, outside the lock, and only the search of the native host's current job
-    may publish or select. A started match rewrites its full log to the archive after every
-    change, so it can be restarted with `Match.restore`.
+    """Every method holds `_lock`. One job runs at a time: each job's thread first joins its
+    predecessor, outside the lock, and only the native host's current job may publish or
+    select. A started match rewrites its full log to the archive after every change, so it
+    can be restarted with `Match.restore`.
     """
 
     def __init__(
@@ -58,9 +58,9 @@ class Match:
         self._archive = archive
         offered = {actor.identity: actor for actor in setup.actors}
         self._agents: dict[int, Agent] = {
-            seat: agents(offered[entry["identity"]], seat)
-            for seat, entry in enumerate(json.loads(native.seats()))
-            if entry["kind"] == "agent"
+            seat: agents(offered[identity], seat)
+            for seat, (kind, identity) in enumerate(native.seats())
+            if kind == "agent"
         }
         # Agent sessions initialize (model compilation, caches) before any clock runs; a
         # finished match runs no clock.
@@ -68,7 +68,7 @@ class Match:
         if not episode.is_terminal():
             for agent in self._agents.values():
                 agent.warm(episode)
-        self._search: SearchJob | None = None
+        self._job: Job | None = None
         self._last_thread: threading.Thread | None = None
         with self._lock:
             self._sync()
@@ -118,12 +118,12 @@ class Match:
             self._sync()
 
     def close(self) -> None:
-        """Stop any search and wait for it, so no evaluation outlives the match."""
+        """Stop any job and wait for it, so no evaluation outlives the match."""
         with self._lock:
             self._native.close(_now())
             self._sync()
             thread = self._last_thread
-        # Outside the lock: the finishing search takes it to discard its result.
+        # Outside the lock: the finishing job takes it to discard its result.
         if thread is not None:
             thread.join()
 
@@ -134,7 +134,7 @@ class Match:
             self._sync()
 
     def analyze(self, position: Any) -> None:
-        """Search one reviewed position of a finished game; `None` stops the search."""
+        """Analyze one reviewed position of a finished game; `None` stops the analysis."""
         with self._lock:
             self._native.analyze(position)
             self._sync()
@@ -158,65 +158,60 @@ class Match:
         with self._lock:
             return self._native.export_text(perspective, _now())
 
-    # Searches ---------------------------------------------------------------------
+    # Jobs -------------------------------------------------------------------------
 
     def _sync(self) -> None:
-        """Align the running search with the native schedule; persist a changed log."""
-        job = self._native.job()
-        running = self._search
-        if running is not None and (job is None or job.id != running.id):
+        """Align the running job with the native schedule; persist a changed log."""
+        due = self._native.job()
+        running = self._job
+        if running is not None and (due is None or due.id != running.id):
             running.end()
-            self._search = None
-        if job is not None and self._search is None:
-            self._launch(job)
+            self._job = None
+        if due is not None and self._job is None:
+            self._launch(due)
         if self._archive is not None and self._native.take_unsaved():
             self._archive.save(self._native.game_id, self._native.archive_log(_now()))
 
-    def _launch(self, job: Any) -> None:
-        agent = self._agents[job.seat]
-        search = SearchJob(job.id, job.kind, job.seat, job.root_actor, job.position)
-        if job.kind == "move":
-            # The timer runs from now, so draining the previous search spends the agent's
-            # own time.
-            search.timer = agent.timer(self._native.clock(), _now())
-        thread = threading.Thread(
-            target=self._run,
-            args=(search, agent, agent.root(self._native.job_episode()), self._last_thread),
-            daemon=True,
-        )
-        self._search = search
+    def _launch(self, due: Any) -> None:
+        job = Job(due.id, due.kind, due.seat, due.root_actor, due.position)
+        # The agent reads the job's decision and the clock now, under the lock, so draining
+        # the previous job spends a move's own time.
+        thought = self._agents[due.seat].start(
+            job, self._native.job_episode(), self._native.clock(), _now())
+        thread = threading.Thread(target=self._run, args=(job, thought, self._last_thread), daemon=True)
+        self._job = job
         self._last_thread = thread
         thread.start()
 
-    def _run(
-        self, search: SearchJob, agent: Agent, root: object, previous: threading.Thread | None
-    ) -> None:
+    def _run(self, job: Job, thought: Thought, previous: threading.Thread | None) -> None:
         try:
-            # One search at a time; native players are not reentrant.
+            # One job at a time; native players are not reentrant.
             if previous is not None:
                 previous.join()
-            report = agent.search(search, root, lambda report, count: self._publish(search, report, count))
+            move = thought.run(lambda report, count: self._publish(job, report, count))
             with self._lock:
-                if self._search is not search:
+                if self._job is not job:
                     return
-                self._search = None
-                if search.kind == "move":
-                    choice = agent.selection(self._native.episode())
-                    self._native.play_agent(search.id, choice, report, _now())
+                if job.kind != "move":
+                    self._job = None
+                    self._native.finish(job.id, _now())
+                elif move is None:
+                    raise ValueError("a move job ended without a selection")
                 else:
-                    self._native.finish(search.id, _now())
+                    self._job = None
+                    self._native.play_agent(job.id, move.choice, move.report, _now())
                 self._sync()
         # Any failure surfaces on the board; the match pauses at its current decision.
         except Exception as error:
             with self._lock:
-                if self._search is search:
-                    self._search = None
-                self._native.fail(search.id, str(error), _now())
+                if self._job is job:
+                    self._job = None
+                self._native.fail(job.id, str(error), _now())
                 self._sync()
 
-    def _publish(self, search: SearchJob, report: str, simulations: int) -> None:
+    def _publish(self, job: Job, report: str, work: int) -> None:
         with self._lock:
-            self._native.publish(search.id, report, simulations)
+            self._native.publish(job.id, report, work)
 
 
 __all__ = ["MATCH_LOG_SCHEMA", "Match", "host_json"]

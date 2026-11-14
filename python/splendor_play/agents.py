@@ -1,19 +1,21 @@
-"""The play host's agent contract: what a match asks of the seats it does not drive itself."""
+"""The play host's agent contract: what a match asks of the seats it does not drive itself.
+
+An agent decides; how is its own. The host starts one job at a time for an agent seat (its
+own move, a pondering of a human's decision, or a finished game's review); a move returns a
+choice index, and reports are optional evidence for display.
+"""
 from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from splendor_game import Clock, Episode
 
-
-class Stop(Protocol):
-    def request(self) -> None: ...
-
-
-class Timer(Protocol):
-    def end(self) -> str | None: ...
+# Publishes a job's progress for display: a JSON report object as text, and the work units
+# (simulations, for a search) spent since the previous report.
+Publish = Callable[[str, int], None]
 
 
 class PlayerRef(Protocol):
@@ -38,14 +40,14 @@ class MatchSetup(Protocol):
     actors: Sequence[PlayerRef]
 
 
-class SearchJob:
-    """One open-ended search of an agent seat, run as short slices on one retained tree.
+class Job:
+    """One job of an agent seat: `kind` is `move`, `ponder` or `review`; `root_actor` is the
+    actor of the job's decision (the seat itself for its own moves, a human it ponders, or
+    either in a finished game's review); `position` is a review's history position.
 
-    Each slice reports the search so far, so the agent's view is shown live; `end` stops
-    the running slice and the slices after it. A move's `timer` ends its search by the
-    agent's time allocation and the search's own progress. `root_actor` is the searched
-    decision's actor: the seat itself for its own moves, a human it ponders, or either in a
-    finished game's review.
+    The host ends a job that is no longer due; `ended` says so, and every callback given to
+    `on_end` runs once at the end, from the ending thread, so an agent can interrupt work in
+    progress.
     """
 
     def __init__(self, id: int, kind: str, seat: int, root_actor: int,
@@ -55,36 +57,63 @@ class SearchJob:
         self.seat = seat
         self.root_actor = root_actor
         self.position = position
-        self.done = threading.Event()
-        self.slice: Stop | None = None
-        self.timer: Timer | None = None
+        self._ended = threading.Event()
+        self._lock = threading.Lock()
+        self._on_end: list[Callable[[], None]] = []
+
+    @property
+    def ended(self) -> bool:
+        return self._ended.is_set()
+
+    def on_end(self, callback: Callable[[], None]) -> None:
+        """Run `callback` when the job ends, at once if it already has."""
+        with self._lock:
+            if not self._ended.is_set():
+                self._on_end.append(callback)
+                return
+        callback()
 
     def end(self) -> None:
-        self.done.set()
-        running = self.slice
-        if running is not None:
-            running.request()
+        with self._lock:
+            self._ended.set()
+            callbacks, self._on_end = self._on_end, []
+        for callback in callbacks:
+            callback()
+
+
+@dataclass(frozen=True)
+class Move:
+    """A move job's selection: an index into the legal choices of the job's decision, and the
+    agent's final JSON report object as text, if it reports."""
+
+    choice: int
+    report: str | None = None
+
+
+class Thought(Protocol):
+    """One started job, run off the host's lock. It returns a `Move` for a move job and
+    `None` otherwise, once it decides or its job ends; `publish` shows progress meanwhile."""
+
+    def run(self, publish: Publish) -> Move | None: ...
 
 
 class Agent(Protocol):
     """One actor's play at one seat of one match, driven by the host.
 
-    `root` detaches the agent's view of a decision from a read-only episode view, so the
-    search outlives later selections; `search` runs on such a root until `job` ends,
-    publishing each slice's JSON report text with the simulations it completed, and returns
-    the last report. `selection` names the retained move's index among the live episode's
-    legal choices and must reject an episode its root was not taken from. Reports are
-    display and evidence only, never commands.
+    `warm` prepares the agent (a model session, caches) before any clock runs. `start` runs
+    under the host's lock: it takes what the job needs from read-only views of the job's
+    decision and the match clock at `now_ms` -- views that expire when it returns -- and
+    returns the `Thought` the host then runs. The host binds a move to the job's decision,
+    so a stale job's move is discarded.
     """
 
     def warm(self, episode: Episode) -> None: ...
-    def root(self, episode: Episode) -> object: ...
-    def timer(self, clock: Clock, now_ms: float) -> Timer: ...
-    def search(self, job: SearchJob, root: object, publish: Callable[[str, int], None]) -> str: ...
-    def selection(self, episode: Episode) -> int: ...
+    def start(self, job: Job, episode: Episode, clock: Clock, now_ms: float) -> Thought: ...
 
 
 # An agent for an offered actor at a seat.
 AgentFactory = Callable[[PlayerRef, int], Agent]
 
-__all__ = ["Agent", "AgentFactory", "MatchSetup", "PlayerRef", "SearchJob", "Stop", "Timer"]
+__all__ = [
+    "Agent", "AgentFactory", "Job", "MatchSetup", "Move", "PlayerRef", "Publish", "Thought",
+]

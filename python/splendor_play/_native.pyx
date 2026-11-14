@@ -1,7 +1,9 @@
 # distutils: language = c++
 """The native match host (`splendor::play`): JSON text in and out, nothing per choice."""
 from libcpp cimport bool as cppbool
+from libcpp.optional cimport optional
 from libcpp.string cimport string
+from libcpp.vector cimport vector
 from libc.stdint cimport int64_t, uint8_t, uint64_t
 
 from splendor_game.engine cimport (
@@ -17,31 +19,18 @@ cdef extern from *:
     using splendor::play::Json;
     using splendor::play::Match;
 
-    static splendor::play::MatchHost host_of(const std::string& host) {
-        const Json raw = Json::parse(host);
-        raw.closed({"log_contract", "max_game_plies", "conditions", "actors"}, "match host");
-        splendor::play::MatchHost out{
-            raw.at("log_contract").as_string("log_contract"),
-            static_cast<std::uint32_t>(raw.at("max_game_plies").as_uint("max_game_plies", 32, true)),
-            raw.at("conditions"), {}};
-        for (const Json& actor : raw.at("actors").as_array("actors")) {
-            actor.closed({"name", "identity", "summary"}, "actor");
-            out.actors.push_back({actor.at("name").as_string("name"),
-                                  actor.at("identity").as_string("identity"), actor.at("summary")});
-        }
-        return out;
-    }
     static Match* create(const splendor::Catalog& catalog, const std::string& host,
                          const std::string& settings, std::uint64_t unix_ms) {
-        const splendor::play::MatchHost resolved = host_of(host);
+        const splendor::play::MatchHost resolved = splendor::play::parse_host(Json::parse(host));
         return new Match(catalog, resolved, splendor::play::parse_settings(Json::parse(settings), resolved),
                          unix_ms);
     }
     static Match* restore(const splendor::Catalog& catalog, const std::string& host,
                           const std::string& log, double now_ms) {
-        return Match::restore(catalog, host_of(host), Json::parse(log), now_ms).release();
+        return Match::restore(catalog, splendor::play::parse_host(Json::parse(host)), Json::parse(log), now_ms)
+            .release();
     }
-    // The pending search: kind is 0 move, 1 ponder, 2 review; position is -1 unless reviewing.
+    // The pending job: kind is 0 move, 1 ponder, 2 review; position is -1 unless reviewing.
     struct Job {
         bool due{};
         std::uint64_t id{};
@@ -64,20 +53,25 @@ cdef extern from *:
     static void play(Match& match, const std::string& key, std::uint64_t revision, double now_ms) {
         match.play(key, revision, now_ms);
     }
+    static void play_agent(Match& match, std::uint64_t job, std::size_t choice,
+                           const std::optional<std::string>& report, double now_ms) {
+        match.play_agent(job, choice, report ? std::optional<std::string_view>(*report) : std::nullopt, now_ms);
+    }
     static void analyze(Match& match, std::int64_t position) {
         match.analyze(position < 0 ? std::nullopt : std::optional<std::size_t>(position));
     }
     static std::string state(Match& match, std::uint8_t perspective, std::int64_t since, double now_ms) {
         return match.state(perspective, since < 0 ? std::nullopt : std::optional<std::uint64_t>(since), now_ms);
     }
-    static std::string seats(const Match& match) {
-        Json seats = Json::array();
-        for (const auto& seat : match.seats()) {
-            seats.push(Json(Json::Object{
-                {"kind", Json(seat.kind == splendor::play::SeatKind::Human ? "human" : "agent")},
-                {"identity", Json(seat.identity)}}));
-        }
-        return seats.dump();
+    // Each seat's kind (0 human, 1 agent) and identity, in seat order.
+    struct Seat {
+        std::uint8_t kind{};
+        std::string identity;
+    };
+    static std::vector<Seat> seats(const Match& match) {
+        std::vector<Seat> out;
+        for (const auto& seat : match.seats()) out.push_back({static_cast<std::uint8_t>(seat.kind), seat.identity});
+        return out;
     }
     static std::string catalog_view(const splendor::Catalog& catalog) {
         return splendor::play::catalog_json(catalog);
@@ -99,7 +93,6 @@ cdef extern from *:
         void close(double) except +
         void publish(uint64_t, const string&, uint64_t) except +
         void finish(uint64_t, double) except +
-        void play_agent(uint64_t, size_t, const string&, double) except +
         void fail(uint64_t, const string&, double) except +
         string export_log(uint8_t, double) except +
         string export_text(uint8_t, double) except +
@@ -107,7 +100,6 @@ cdef extern from *:
         cppbool take_unsaved()
         const NativeTurnEpisode& episode()
         const GameClock& clock()
-        uint64_t version()
         const string& game_id()
         uint8_t default_perspective()
     cppclass SharedEpisode "play_shim::SharedEpisode":
@@ -121,20 +113,25 @@ cdef extern from *:
         uint64_t revision
         int64_t position
         cppbool concealed
+    cppclass ShimSeat "play_shim::Seat":
+        uint8_t kind
+        string identity
     NativeMatch* shim_create "play_shim::create"(const NativeCatalog&, const string&, const string&, uint64_t) except +
     NativeMatch* shim_restore "play_shim::restore"(const NativeCatalog&, const string&, const string&, double) except +
     ShimJob shim_job "play_shim::job"(const NativeMatch&)
     SharedEpisode shim_job_episode "play_shim::job_episode"(const NativeMatch&) except +
     void shim_play "play_shim::play"(NativeMatch&, const string&, uint64_t, double) except +
+    void shim_play_agent "play_shim::play_agent"(NativeMatch&, uint64_t, size_t, const optional[string]&, double) except +
     void shim_analyze "play_shim::analyze"(NativeMatch&, int64_t) except +
     string shim_state "play_shim::state"(NativeMatch&, uint8_t, int64_t, double) except +
-    string shim_seats "play_shim::seats"(const NativeMatch&) except +
+    vector[ShimSeat] shim_seats "play_shim::seats"(const NativeMatch&) except +
     string shim_catalog_view "play_shim::catalog_view"(const NativeCatalog&) except +
     string shim_summary "play_shim::summary"(const string&, const string&) except +
     string shim_records "play_shim::records"(const string&) except +
 
 
 _JOB_KINDS = ("move", "ponder", "review")
+_SEAT_KINDS = ("human", "agent")
 
 
 def catalog_view(Catalog catalog not None):
@@ -157,7 +154,7 @@ cdef class _SharedEpisode:
 
 
 cdef class NativeJob:
-    """The search a host should run (`splendor::play::Job`)."""
+    """The job a host should run for an agent seat (`splendor::play::Job`)."""
     cdef readonly uint64_t id
     cdef readonly str kind
     cdef readonly int seat
@@ -191,16 +188,15 @@ cdef class HostMatch:
         return match
 
     def seats(self):
-        """Each seat's kind and identity, as JSON text."""
-        return shim_seats(self._match[0]).decode("utf-8")
+        """Each seat's `(kind, identity)` in seat order: kind `human` or `agent`, identity
+        an agent's offered actor's (`human` for a human)."""
+        return tuple(
+            (_SEAT_KINDS[seat.kind], seat.identity.decode("utf-8")) for seat in shim_seats(self._match[0])
+        )
 
     @property
     def game_id(self):
         return self._match.game_id().decode("utf-8")
-
-    @property
-    def version(self):
-        return self._match.version()
 
     @property
     def default_perspective(self):
@@ -261,8 +257,12 @@ cdef class HostMatch:
     def finish(self, uint64_t job, double now_ms):
         self._match.finish(job, now_ms)
 
-    def play_agent(self, uint64_t job, size_t choice, str report, double now_ms):
-        self._match.play_agent(job, choice, report.encode("utf-8"), now_ms)
+    def play_agent(self, uint64_t job, size_t choice, report, double now_ms):
+        """A move job's selection, with the agent's final JSON report text or `None`."""
+        cdef optional[string] native
+        if report is not None:
+            native = <string>(<str>report).encode("utf-8")
+        shim_play_agent(self._match[0], job, choice, native, now_ms)
 
     def fail(self, uint64_t job, str error, double now_ms):
         self._match.fail(job, error.encode("utf-8"), now_ms)

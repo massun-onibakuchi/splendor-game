@@ -145,6 +145,20 @@ void member(std::string& out, const std::string_view key, const Json& value) {
 
 }  // namespace
 
+MatchHost parse_host(const Json& description) {
+    description.closed({"log_contract", "max_game_plies", "conditions", "actors"}, "match host");
+    MatchHost host{
+        description.at("log_contract").as_string("log_contract"),
+        static_cast<std::uint32_t>(description.at("max_game_plies").as_uint("max_game_plies", 32, true)),
+        description.at("conditions"), {}};
+    for (const Json& actor : description.at("actors").as_array("actors")) {
+        actor.closed({"name", "identity", "summary"}, "actor");
+        host.actors.push_back(
+            {actor.at("name").as_string("name"), actor.at("identity").as_string("identity"), actor.at("summary")});
+    }
+    return host;
+}
+
 MatchSettings parse_settings(const Json& request, const MatchHost& host) {
     request.closed({"seats", "time_control", "show_analysis", "seed"}, "match settings");
     MatchSettings settings;
@@ -446,15 +460,13 @@ void Match::analyze(const std::optional<std::size_t> position) {
 // Jobs ---------------------------------------------------------------------------
 
 std::shared_ptr<const TurnEpisode> Match::job_episode() const {
-    if (!job_) throw std::logic_error("no search is due");
+    if (!job_) throw std::logic_error("no job is due");
     return job_->kind == JobKind::Review ? review_episode_ : episode_;
 }
 
 void Match::publish(const std::uint64_t job, const std::string_view report, const std::uint64_t simulations) {
-    if (!job_ || job_->id != job) {
-        // A stale search's work still counts toward its seat's next move.
-        return;
-    }
+    // A stale job's report is discarded.
+    if (!job_ || job_->id != job) return;
     Json value = Json::parse(report);
     value.as_object("an agent report");
     value.set("kind", Json(job_->kind == JobKind::Review
@@ -487,40 +499,47 @@ void Match::finish(const std::uint64_t job, const double now_ms) {
     // Completing root readiness past a bank's end loses on time, unplayed.
     expire(now_ms);
     if (!job_ || job_->id != job) return;
-    if (job_->kind == JobKind::Move) throw std::logic_error("a move search ends with its selection");
+    if (job_->kind == JobKind::Move) throw std::logic_error("a move job ends with its selection");
     job_.reset();
     thinking_since_.reset();
     touch();
 }
 
 void Match::play_agent(
-    const std::uint64_t job, const std::size_t choice, const std::string_view report, const double now_ms) {
+    const std::uint64_t job, const std::size_t choice, const std::optional<std::string_view> report,
+    const double now_ms) {
     if (!job_ || job_->id != job) return;
     expire(now_ms);
     if (!job_ || job_->id != job) return;
     if (job_->kind != JobKind::Move || job_->revision != revision()) {
-        throw std::logic_error("only a current move search selects");
+        throw std::logic_error("only a current move job selects");
     }
     const Job finished = *job_;
     if (choice >= episode_->legal_choices().size()) reject("agent selection is not a legal choice");
     // A malformed report fails before the job ends, so the host can still report the failure.
-    Json search = Json::parse(report);
-    search.as_object("an agent report");
+    Json search;
+    if (report) {
+        search = Json::parse(*report);
+        search.as_object("an agent report");
+    }
     job_.reset();
     thinking_since_.reset();
     const std::int64_t elapsed = decided(now_ms);
-    search.set("kind", Json("move"));
-    search.set("seat", Json(finished.seat));
-    search.set("actor", Json(finished.root_actor));
-    search.set("concealed", Json(finished.concealed));
-    // This decision's own simulations and those pondered before it; `root_visits` includes
-    // any the agent's retained tree inherited.
-    search.set("simulations", Json(move_work_[finished.seat]));
-    search.set("pondered_simulations", Json(ponder_work_[finished.seat]));
-    search.set("think_ms", Json(elapsed));
+    if (report) {
+        search.set("kind", Json("move"));
+        search.set("seat", Json(finished.seat));
+        search.set("actor", Json(finished.root_actor));
+        search.set("concealed", Json(finished.concealed));
+        // This decision's own simulations and those pondered before it; `root_visits`
+        // includes any the agent's retained tree inherited.
+        search.set("simulations", Json(move_work_[finished.seat]));
+        search.set("pondered_simulations", Json(ponder_work_[finished.seat]));
+        search.set("think_ms", Json(elapsed));
+    }
+    // A move without a report leaves no last search: an earlier one is not this move's.
+    last_search_ = search;
     move_work_[finished.seat] = 0;
     ponder_work_[finished.seat] = 0;
-    last_search_ = search;
     apply_choice(choice, {}, elapsed, std::move(search), Json(), false);
     advance(now_ms);
 }
@@ -531,7 +550,7 @@ void Match::fail(const std::uint64_t job, const std::string_view error, const do
     expire(now_ms);
     if (!job_ || job_->id != job) return;
     halt();
-    error_ = "agent search failed: " + std::string(error);
+    error_ = "agent failed: " + std::string(error);
     if (status_ == MatchStatus::Running) {
         clock_.stop(now_ms);
         status_ = MatchStatus::Paused;
@@ -587,7 +606,7 @@ void Match::advance(const double now_ms) {
         if (settings_.seats[actor].kind == SeatKind::Agent) {
             launch(JobKind::Move, actor, now_ms);
         } else {
-            // The next pondering agent in turn order searches the human's decision.
+            // The next pondering agent in turn order thinks about the human's decision.
             const auto seats = static_cast<std::uint8_t>(settings_.seats.size());
             for (std::uint8_t offset = 1; offset < seats; ++offset) {
                 const auto seat = static_cast<std::uint8_t>((actor + offset) % seats);
@@ -612,7 +631,7 @@ void Match::launch(
     const std::uint8_t actor = episode.current_player();
     job_ = Job{next_job_++, kind, seat, actor, revision(), position,
                concealed_actor(episode.world().state, actor)};
-    // A move's thinking time runs from now, so draining a previous search spends its own.
+    // A move's thinking time runs from now, so draining a previous job spends its own.
     if (kind == JobKind::Move) thinking_since_ = now_ms;
 }
 

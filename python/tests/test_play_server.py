@@ -1,8 +1,8 @@
 """The match API over seats of any kind: a human and an agent alternate and the log
 restarts exactly; agents play each other to the end and a finished game analyzes review;
-humans share a board from their own perspectives; a spent bank loses on time; archives
-count agents against humans; the board is served only from its own directory, to its own
-origin."""
+an agent that only decides needs no reports; humans share a board from their own
+perspectives; a spent bank loses on time; archives count agents against humans; the board
+is served only from its own directory, to its own origin."""
 
 from __future__ import annotations
 
@@ -35,8 +35,9 @@ def _post(url: str, body: dict) -> tuple[int, dict]:
         return error.code, json.load(error)
 
 
-def _agent(url: str, ponder: bool = False) -> dict:
-    return {"kind": "agent", "actor": _get(url + "api/config")["actors"][0]["label"], "ponder": ponder}
+def _agent(url: str, ponder: bool = False, actor: int = 0) -> dict:
+    label = _get(url + "api/config")["actors"][actor]["label"]
+    return {"kind": "agent", "actor": label, "ponder": ponder}
 
 
 def _new_match(url: str, seats: list[dict], time_control: dict, *, start: bool = True) -> int:
@@ -134,6 +135,21 @@ def test_agents_play_each_other_and_a_finished_game_analyzes_review(short_board_
     assert review["position"] == 0 and review["kind"] == "move"
     status, body = _post(url + "api/analyze", {"match_id": match, "history_index": 10_000})
     assert status == 409 and "no such position" in body["error"]
+
+
+def test_agents_that_only_decide_play_without_reports(short_board_url) -> None:
+    url = short_board_url
+    silent = _agent(url, ponder=True, actor=1)
+    match = _new_match(url, [silent, HUMAN, silent], TURN)
+    for _ in range(2):
+        state = _until(lambda state: state["choices"], url, f"?match={match}&seat=1")
+        body = {"match_id": match, "key": state["choices"][0]["key"], "revision": state["revision"]}
+        assert _post(url + "api/play", body)[0] == 200
+    state = _until(lambda state: state["choices"], url, f"?match={match}&seat=1")
+    agent_moves = [step for step in state["log"] if step["actor"] != 1 and not step["forced"]]
+    assert len(agent_moves) >= 4
+    assert all(step["search"] is None and step["ponder"] is None for step in state["log"])
+    assert state["last_search"] is None and state["error"] is None
 
 
 def test_humans_share_a_board_from_their_own_perspectives(board_url) -> None:

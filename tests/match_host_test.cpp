@@ -64,6 +64,10 @@ TEST(MatchHost, SettingsSeatAnyKindsAtEverySupportedCount) {
     EXPECT_EQ(settings({human(), agent("A")}).seats[0].name, "Human");
     const MatchSettings two_humans = settings({human(), human()});
     EXPECT_EQ(two_humans.seats[1].name, "Human 2");
+    const MatchSettings same_actor = settings({agent("A"), human(), agent("A"), agent("B")});
+    std::vector<std::string> names;
+    for (const Seat& seat : same_actor.seats) names.push_back(seat.name);
+    EXPECT_EQ(names, (std::vector<std::string>{"A #1", "Human", "A #2", "B"}));
     EXPECT_EQ(settings({agent("A"), agent("B"), human(), human()}).seats.size(), 4U);
     EXPECT_THROW(settings({human()}), std::invalid_argument);
     EXPECT_THROW(settings({human(), Json::parse(R"({"kind":"robot"})")}), std::invalid_argument);

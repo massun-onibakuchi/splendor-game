@@ -150,15 +150,14 @@ MatchSettings parse_settings(const Json& request, const MatchHost& host) {
     MatchSettings settings;
     const Json::Array& seats = request.at("seats").as_array("seats");
     if (seats.size() < kMinPlayers || seats.size() > kMaxPlayers) reject("a match seats two to four players");
-    std::size_t humans = 0;
     for (const Json& raw : seats) {
         const std::string& kind = raw.at("kind").as_string("seat kind");
         Seat seat;
         if (kind == "human") {
             raw.closed({"kind"}, "human seat");
             seat.kind = SeatKind::Human;
+            seat.name = "Human";
             seat.identity = "human";
-            ++humans;
         } else if (kind == "agent") {
             raw.closed({"kind", "actor", "ponder"}, "agent seat");
             const std::string& name = raw.at("actor").as_string("actor");
@@ -176,10 +175,15 @@ MatchSettings parse_settings(const Json& request, const MatchHost& host) {
         }
         settings.seats.push_back(std::move(seat));
     }
-    std::size_t human = 0;
-    for (Seat& seat : settings.seats) {
-        if (seat.kind != SeatKind::Human) continue;
-        seat.name = humans == 1 ? "Human" : "Human " + std::to_string(++human);
+    // Every seat's name is unique: a name several seats would carry is numbered in seat
+    // order, "Human 1", "Human 2" and "A #1", "A #2" (actor names often end in digits).
+    std::vector<std::string> names;
+    for (const Seat& seat : settings.seats) names.push_back(seat.name);
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        if (std::count(names.begin(), names.end(), names[index]) == 1) continue;
+        Seat& seat = settings.seats[index];
+        const auto order = std::count(names.begin(), names.begin() + static_cast<std::ptrdiff_t>(index), names[index]) + 1;
+        seat.name += (seat.kind == SeatKind::Human ? " " : " #") + std::to_string(order);
     }
     const Json& seed = request.at("seed");
     // A browser cannot carry every uint64 as a JSON number; a decimal string is exact.

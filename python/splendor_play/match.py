@@ -1,9 +1,9 @@
 """One human-versus-model match: turn order, clock, pause, model search, and its log.
 
-The match runs the canonical staged-action turn with blind reservation. Everything the
-human receives is the human seat's observation; the model's concealed cards reach the
-human only through what the rules reveal. The native `GameClock` keeps time; the agent's
-timer ends each of the model's searches.
+The match runs the canonical staged-action turn. Everything the human receives is the
+human seat's observation; the model's concealed cards reach the human only through what
+the rules reveal. The native `GameClock` keeps time; the agent's timer ends each of the
+model's searches.
 """
 
 from __future__ import annotations

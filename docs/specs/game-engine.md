@@ -24,7 +24,7 @@ under `NATIVE_PREFIX`; it MUST NOT embed a second engine. A bridge MUST NOT seri
 game value or a selected choice into Python objects or JSON just to pass it back into
 native code. JSON board, choice and trace rendering is presentation.
 
-Contract identifiers name what consumers persist: the rules (`splendor-game-2p-blind-v1`),
+Contract identifiers name what consumers persist: the rules (`splendor-game-2p-v1`),
 the staged decision surface (`splendor-staged-action-v1`) and the standard catalog
 (`splendor-standard-catalog-v1`, with its payload digest). A behavior change to rules or
 surface is a new version.

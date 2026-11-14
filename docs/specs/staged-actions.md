@@ -12,7 +12,7 @@ tags:
 
 ## Scope
 
-`splendor-staged-action-v1` defines decisions for `splendor-game-2p-blind-v1`.
+`splendor-staged-action-v1` defines decisions for `splendor-game-2p-v1`.
 Games start from ordinary setup or a validated supplied MAIN state.
 [turn.hpp](../../include/splendor/turn.hpp) owns the executable boundary;
 [observations](observations.md) owns seat knowledge.

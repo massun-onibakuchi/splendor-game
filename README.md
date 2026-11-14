@@ -1,8 +1,8 @@
 # splendor-game
 
-Native Splendor (two players, blind reservation) for agents of any kind: a C++20 game
-engine with staged decisions, legal-choice surfaces, chance, seat views, replay and match
-clocks; Python bindings; and a practical-play host for human-versus-agent matches.
+Native two-player Splendor for agents of any kind: a C++20 game engine with staged
+decisions, legal-choice surfaces, chance, seat views, replay and match clocks; Python
+bindings; and a practical-play host for human-versus-agent matches.
 
 Contracts live in [docs/specs](docs/specs/spec.md).
 

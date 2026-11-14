@@ -20,8 +20,7 @@ Its encoding also names MAIN primaries, with MAIN's delta, no noble, and the add
 `reserve_blind` family.
 
 Reservation generation takes gold exactly when bank gold is available, even if cleanup
-returns it. Blind reservations follow the reserve-count and deck-availability rules in
-[staged actions](staged-actions.md#game-rules).
+returns it.
 
 ## Candidate descriptor
 

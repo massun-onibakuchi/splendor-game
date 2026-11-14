@@ -9,7 +9,7 @@
 namespace splendor {
 // Versioned identities of the rules and the staged decision surface. A change to either's
 // behavior is a new version.
-inline constexpr std::string_view kGameContract = "splendor-game-2p-blind-v1";
+inline constexpr std::string_view kGameContract = "splendor-game-2p-v1";
 inline constexpr std::string_view kStagedActionContract = "splendor-staged-action-v1";
 // The standard catalog shipped in `data/` (any catalog of this shape loads; see catalog.hpp).
 inline constexpr std::string_view kCatalogContract = "splendor-standard-catalog-v1";

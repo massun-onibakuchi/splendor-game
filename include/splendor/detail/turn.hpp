@@ -171,10 +171,8 @@ std::optional<TerminalFacts> finish_turn_state(
 // every reserve of the actor carries its identity.
 ValidationResult validate_resolved_draws(const State& state, const Catalog& catalog);
 
-// How many joint cleanups the actor's current holding and bonuses allow -- each complete
-// return crossed with each eligible noble, or the one empty cleanup when neither
-// obligation exists -- without building them, and, when exactly one is legal, that forced
-// cleanup's return and noble.
+// How many joint cleanups the actor's holding allows, without building them, and, when
+// exactly one is legal, that forced cleanup's return and noble.
 struct CleanupSupport {
     std::size_t count{};
     std::array<std::uint8_t, kTokenColorCount> forced_return{};

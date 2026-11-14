@@ -55,9 +55,6 @@ public:
     // The pending decision's legal choices in choice order; empty once the game is over.
     const std::vector<TurnChoice>& legal_choices() const noexcept { return choices_; }
     std::uint64_t decision_seed() const;
-    // Process-local identity and mutation generation, not random seeds or replay metadata.
-    std::uint64_t identity() const noexcept { return identity_; }
-    std::uint64_t revision() const noexcept { return revision_; }
 
     std::uint32_t game_ply() const noexcept { return decision_.state.game_ply; }
     std::uint8_t current_player() const noexcept { return decision_.state.current_player; }
@@ -86,8 +83,6 @@ private:
     std::vector<TurnChoice> choices_;
     std::optional<TerminalFacts> terminal_;
     std::vector<TurnTraceStep> trace_;
-    const std::uint64_t identity_;
-    std::uint64_t revision_{};
 };
 
 }  // namespace splendor

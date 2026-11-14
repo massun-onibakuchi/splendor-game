@@ -57,8 +57,7 @@ renderings derive from a step on demand, so recording costs no formatting and a 
 game plays as fast as the trusted staged primitives. It borrows an immutable catalog that
 MUST outlive it (the Python `Episode` keeps its `Catalog` alive). `view(seat)` is that seat's knowledge; `world()` is the host's
 omniscient state, never an agent input. Views and references to legal choices expire at
-selection. `identity()` and `revision()` are process-local mutation identity, not seeds:
-a detached root taken from an episode can check that it still applies.
+selection.
 
 Native and columnar agents select by index into the current legal choices; untrusted or
 persisted submissions select by key, checked against the current decision and rejected

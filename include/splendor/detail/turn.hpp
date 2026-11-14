@@ -28,11 +28,11 @@ using TokenDelta = std::array<std::int8_t, kTokenColorCount>;
 // at ten held tokens is the null move.
 void normal_form_takes(const State& state, std::vector<TokenDelta>& deltas);
 
-// Applies a primary effect for the state's current actor: its token movement,
-// its reservation or purchase, and the permanent bonus and prestige a purchase
-// grants. Returns the draw the primary owes: the vacated market slot of a tier
-// that still has cards, or the blind reservation awaiting its identity. The effect
-// never includes a return or a noble.
+// Applies a primary effect for the state's current actor: its token movement (a staged
+// primary's take, or a complete leaf's net take less its return), its reservation or
+// purchase, and the permanent bonus and prestige a purchase grants. Returns the draw the
+// primary owes: the vacated market slot of a tier that still has cards, or the blind
+// reservation awaiting its identity. A descriptor's noble is not part of the effect.
 std::optional<OwedDraw> apply_primary_effect(
     State& state,
     const Catalog& catalog,

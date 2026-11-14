@@ -1,5 +1,6 @@
 # distutils: language = c++
-"""Game execution, legal choices and match clocks; linked only to `splendor::game`."""
+"""Game execution, legal choices and match clocks over `splendor::game`, with the
+`splendor::play` renderings a host shows."""
 from libcpp.string cimport string
 from libcpp.vector cimport vector
 from libcpp.optional cimport optional
@@ -20,7 +21,9 @@ cdef extern from *:
     static splendor::Catalog* splendor_load_catalog(const std::string& path) {
         return new splendor::Catalog(splendor::Catalog::load(path));
     }
-    static std::string splendor_game_contract() { return std::string(splendor::kGameContract); }
+    static std::string splendor_game_contract(std::uint8_t players) {
+        return std::string(splendor::game_contract(players));
+    }
     static std::string splendor_catalog_contract() { return std::string(splendor::kCatalogContract); }
     static std::string splendor_staged_contract() { return std::string(splendor::kStagedActionContract); }
     static std::string splendor_seed_contract() { return std::string(splendor::kSeedContract); }
@@ -50,7 +53,7 @@ cdef extern from *:
     }
     """
     NativeCatalog* splendor_load_catalog(const string&) except +
-    string splendor_game_contract()
+    string splendor_game_contract(uint8_t) except +
     string splendor_catalog_contract()
     string splendor_staged_contract()
     string splendor_seed_contract()
@@ -81,10 +84,17 @@ cdef extern from "splendor/choice_columns.hpp" namespace "splendor":
     const uint16_t kNoChoiceCard
     const size_t kTokenColorCount
 
+cdef extern from "splendor/contracts.hpp" namespace "splendor":
+    const uint8_t kMinPlayers
+    const uint8_t kMaxPlayers
+
 cdef extern from *:
     """
     #include "splendor/episode.hpp"
     #include "splendor/choice_columns.hpp"
+    #include "splendor/replay.hpp"
+    #include "splendor/play/render.hpp"
+    // Presentation shims: keys and JSON renderings derive from the typed episode.
     static void splendor_choice_columns(const splendor::TurnEpisode& episode,
                                         splendor::ChoiceColumns& out) {
         splendor::write_choice_columns(episode.legal_choices(), out);
@@ -92,11 +102,98 @@ cdef extern from *:
     static std::size_t splendor_choice_count(const splendor::TurnEpisode& episode) {
         return episode.legal_choices().size();
     }
+    static std::string splendor_phase(const splendor::TurnEpisode& episode) {
+        if (episode.is_terminal()) return "terminal";
+        return std::string(splendor::decision_phase_name(episode.world().phase));
+    }
+    static std::vector<std::string> splendor_choice_keys(const splendor::TurnEpisode& episode) {
+        std::vector<std::string> keys;
+        keys.reserve(episode.legal_choices().size());
+        for (const splendor::TurnChoice& choice : episode.legal_choices()) {
+            keys.push_back(splendor::choice_key(choice));
+        }
+        return keys;
+    }
+    static void splendor_select_key(splendor::TurnEpisode& episode, const std::string& key) {
+        episode.select(std::string_view(key));
+    }
+    static std::string splendor_observe(const splendor::TurnEpisode& episode, std::uint8_t observer) {
+        return splendor::play::board_json(episode.view(observer), episode.catalog(), episode.terminal());
+    }
+    static std::string splendor_choice_details(const splendor::TurnEpisode& episode) {
+        return splendor::play::choices_json(episode.legal_choices(), episode.world().state);
+    }
+    static std::string splendor_token_takes(const splendor::TurnEpisode& episode) {
+        if (episode.is_terminal()) return "[]";
+        return splendor::play::token_takes_json(episode.world());
+    }
+    static std::string splendor_result(const splendor::TurnEpisode& episode) {
+        if (!episode.terminal()) throw std::logic_error("episode is not terminal");
+        return splendor::play::result_json(splendor::match_result(*episode.terminal()));
+    }
+    static std::string splendor_timeout_result(const splendor::TurnEpisode& episode, std::uint8_t loser) {
+        return splendor::play::result_json(splendor::timeout_result(episode.world().state, loser));
+    }
+    static std::string splendor_adjudicate_timeout(
+            const splendor::TurnEpisode& episode, const splendor::GameClock& clock, double now_ms) {
+        const auto result = episode.adjudicate_timeout(clock, now_ms);
+        return result ? splendor::play::result_json(*result) : std::string();
+    }
+    // One drained step for the host log: its key and choice rendering, verified first
+    // against a replay's persisted facts when one is active.
+    struct SplendorTraceRow {
+        std::uint32_t game_ply{};
+        std::uint8_t actor{};
+        bool forced{};
+        std::string action_key;
+        std::string choice;
+        std::optional<std::uint8_t> refill_slot;
+        std::optional<std::uint16_t> refill_card;
+        std::optional<std::uint8_t> blind_draw_tier;
+    };
+    static std::vector<SplendorTraceRow> splendor_drain_trace(
+            splendor::TurnEpisode& episode, splendor::TraceReplay* replay) {
+        const std::vector<splendor::TurnTraceStep> steps = episode.drain_trace();
+        if (replay) replay->verify(steps);
+        std::vector<SplendorTraceRow> rows;
+        rows.reserve(steps.size());
+        for (const splendor::TurnTraceStep& step : steps) {
+            rows.push_back({step.game_ply, step.actor, step.forced, splendor::choice_key(step.choice),
+                            splendor::play::choice_json(step.choice, step.noble_ids),
+                            step.refill_slot, step.refill_card, step.blind_draw_tier});
+        }
+        return rows;
+    }
     """
     void splendor_choice_columns(const NativeTurnEpisode&, ChoiceColumns&) except +
     size_t splendor_choice_count(const NativeTurnEpisode&)
+    string splendor_phase(const NativeTurnEpisode&) except +
+    vector[string] splendor_choice_keys(const NativeTurnEpisode&) except +
+    void splendor_select_key(NativeTurnEpisode&, const string&) except +
+    string splendor_observe(const NativeTurnEpisode&, uint8_t) except +
+    string splendor_choice_details(const NativeTurnEpisode&) except +
+    string splendor_token_takes(const NativeTurnEpisode&) except +
+    string splendor_result(const NativeTurnEpisode&) except +
+    string splendor_timeout_result(const NativeTurnEpisode&, uint8_t) except +
+    string splendor_adjudicate_timeout(const NativeTurnEpisode&, const GameClock&, double) except +
+    cppclass SplendorTraceRow:
+        uint32_t game_ply
+        uint8_t actor
+        bint forced
+        string action_key
+        string choice
+        optional[uint8_t] refill_slot
+        optional[uint16_t] refill_card
+        optional[uint8_t] blind_draw_tier
+    vector[SplendorTraceRow] splendor_drain_trace(NativeTurnEpisode&, TraceReplay*) except +
 
-GAME_CONTRACT = splendor_game_contract().decode("ascii")
+# The seat counts a game may have; each count's rules are a game of their own.
+MIN_PLAYERS = kMinPlayers
+MAX_PLAYERS = kMaxPlayers
+GAME_CONTRACTS = {
+    players: splendor_game_contract(players).decode("ascii")
+    for players in range(MIN_PLAYERS, MAX_PLAYERS + 1)
+}
 CATALOG_CONTRACT = splendor_catalog_contract().decode("ascii")
 STAGED_ACTION_CONTRACT = splendor_staged_contract().decode("ascii")
 SEED_CONTRACT = splendor_seed_contract().decode("ascii")
@@ -158,14 +255,6 @@ cdef object _column(const void* data, size_t count, str fmt, size_t itemsize, tu
     return memoryview(storage).cast(fmt, shape)
 
 
-cdef dict _terminal(const TurnTerminal& record):
-    return {
-        "reason": record.reason.decode("ascii"),
-        "winner_seat": None if record.winner_seat < 0 else record.winner_seat,
-        "final_prestige": list(record.final_prestige),
-    }
-
-
 cdef class Catalog:
     """An immutable card and noble catalog, shared by any number of episodes. Any catalog
     of the standard shape loads; pin the one you play by `payload_sha256`."""
@@ -199,11 +288,11 @@ cdef class Episode:
     draws and turn completion are applied natively. The episode keeps its catalog alive.
     """
 
-    def __cinit__(self, Catalog catalog not None, uint32_t max_game_plies,
+    def __cinit__(self, Catalog catalog not None, uint8_t player_count, uint32_t max_game_plies,
                   uint64_t setup_seed, uint64_t episode_seed):
         self.catalog = catalog
         self._episode = new NativeTurnEpisode(
-            catalog._catalog[0], max_game_plies, setup_seed, episode_seed)
+            catalog._catalog[0], player_count, max_game_plies, setup_seed, episode_seed)
 
     def __dealloc__(self):
         del self._episode
@@ -213,9 +302,13 @@ cdef class Episode:
     def max_game_plies(self):
         return self._episode.max_game_plies()
 
+    @property
+    def player_count(self):
+        return self._episode.player_count()
+
     def phase(self):
         """`main`, `cleanup` or `terminal`."""
-        return self._episode.phase().decode("ascii")
+        return splendor_phase(self._episode[0]).decode("ascii")
 
     def game_ply(self):
         return self._episode.game_ply()
@@ -232,7 +325,7 @@ cdef class Episode:
 
     def choices(self):
         """The legal choices' keys, in choice order."""
-        return tuple(key.decode("ascii") for key in self._episode.choices())
+        return tuple(key.decode("ascii") for key in splendor_choice_keys(self._episode[0]))
 
     def choice_table(self):
         """The legal choices as typed columns in choice order (`splendor/choice_columns.hpp`).
@@ -269,21 +362,21 @@ cdef class Episode:
         return bool(self._episode.is_terminal())
 
     def terminal(self):
-        return _terminal(self._episode.terminal())
+        """The finished game's result as JSON text."""
+        return splendor_result(self._episode[0]).decode("ascii")
 
     def timeout_result(self, uint8_t loser):
-        return _terminal(self._episode.timeout_result(loser))
+        """The result were `loser` to time out at the pending decision, as JSON text."""
+        return splendor_timeout_result(self._episode[0], loser).decode("ascii")
 
     def adjudicate_timeout(self, Clock clock not None, double now_ms):
-        cdef optional[TurnTerminal] result = self._episode.adjudicate_timeout(clock._clock[0], now_ms)
-        if not result.has_value():
-            return None
-        return _terminal(result.value())
+        """The pending actor's timeout under `clock` as result JSON text, or `None`."""
+        cdef string result = splendor_adjudicate_timeout(self._episode[0], clock._clock[0], now_ms)
+        return result.decode("ascii") if result.size() else None
 
     def select(self, str action_key):
         """Apply the legal choice with this key; any other key is rejected unchanged."""
-        cdef string key = action_key.encode("ascii")
-        self._episode.select(key)
+        splendor_select_key(self._episode[0], action_key.encode("ascii"))
 
     def select_index(self, size_t index):
         """Apply the legal choice at this position of choice order."""
@@ -291,24 +384,22 @@ cdef class Episode:
 
     def observe(self, uint8_t observer):
         """The current decision as `observer` sees it, as JSON text."""
-        return self._episode.observe(observer).decode("ascii")
+        return splendor_observe(self._episode[0], observer).decode("ascii")
 
     def choice_details(self):
         """The legal choices as JSON text, public referents resolved, in key order."""
-        return self._episode.choice_details().decode("ascii")
+        return splendor_choice_details(self._episode[0]).decode("ascii")
 
     def token_takes(self):
         """A MAIN decision's official gem takes before any return, as JSON text."""
-        return self._episode.token_takes().decode("ascii")
+        return splendor_token_takes(self._episode[0]).decode("ascii")
 
     def drain_trace(self):
         """Every choice applied since the previous drain, forced ones included.
 
         `choice` is the JSON text `choice_details` gave the choice at its decision.
         """
-        cdef vector[TurnTraceStep] steps = self._episode.drain_trace()
-        if self._replay != NULL:
-            self._replay.verify(steps)
+        cdef vector[SplendorTraceRow] steps = splendor_drain_trace(self._episode[0], self._replay)
         return [
             {
                 "game_ply": step.game_ply,
@@ -328,8 +419,8 @@ cdef class Episode:
     def expect_trace(self, rows):
         """Parse persisted trace facts once, before draining any generated trace: every
         later drain is verified against them, and `finish_replay` requires all of them."""
-        cdef vector[TurnTraceStep] expected
-        cdef TurnTraceStep step
+        cdef vector[RecordedStep] expected
+        cdef RecordedStep step
         if self._replay != NULL:
             raise ValueError("a replay is already active")
         for row in rows:
@@ -343,7 +434,6 @@ cdef class Episode:
             step.action_key = row["action_key"].encode("ascii")
             step.refill_slot.reset()
             step.refill_card.reset()
-            step.blind_draw_tier.reset()
             if row["refill_slot"] is not None:
                 step.refill_slot = <uint8_t>_uint(row["refill_slot"], 8, "refill_slot")
             if row["refill_card"] is not None:

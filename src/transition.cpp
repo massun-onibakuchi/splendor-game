@@ -108,31 +108,48 @@ std::optional<TerminalFacts> terminal_facts(
     facts.reason = ordinary
         ? TerminalReason::TargetScoreEqualTurns
         : TerminalReason::MaxGamePlies;
-    for (std::size_t seat = 0; seat < kPlayerCount; ++seat) {
+    facts.player_count = state.player_count;
+    for (std::size_t seat = 0; seat < state.player_count; ++seat) {
         facts.final_prestige[seat] = state.players[seat].prestige;
         facts.purchased_cards[seat] = state.players[seat].purchased_cards;
     }
     if (facts.reason == TerminalReason::MaxGamePlies) return facts;
-    if (facts.final_prestige[0] > facts.final_prestige[1]) {
-        facts.winner_seat = 0;
-    } else if (facts.final_prestige[1] > facts.final_prestige[0]) {
-        facts.winner_seat = 1;
-    } else if (facts.purchased_cards[0] < facts.purchased_cards[1]) {
-        facts.winner_seat = 0;
-    } else if (facts.purchased_cards[1] < facts.purchased_cards[0]) {
-        facts.winner_seat = 1;
+    // Greatest prestige, then fewest purchased cards; whoever remains shares the win.
+    std::size_t best = 0;
+    for (std::size_t seat = 1; seat < state.player_count; ++seat) {
+        if (facts.final_prestige[seat] > facts.final_prestige[best]
+            || (facts.final_prestige[seat] == facts.final_prestige[best]
+                && facts.purchased_cards[seat] < facts.purchased_cards[best])) {
+            best = seat;
+        }
+    }
+    for (std::size_t seat = 0; seat < state.player_count; ++seat) {
+        if (facts.final_prestige[seat] == facts.final_prestige[best]
+            && facts.purchased_cards[seat] == facts.purchased_cards[best]) {
+            facts.winners = static_cast<SeatMask>(facts.winners | (1U << seat));
+        }
     }
     return facts;
 }
 
-std::array<double, kPlayerCount> terminal_utilities(const TerminalFacts& terminal) {
-    constexpr double kSeats = static_cast<double>(kPlayerCount);
-    const double winners = terminal.winner_seat ? 1.0 : kSeats;
-    std::array<double, kPlayerCount> utility{};
-    for (std::size_t seat = 0; seat < kPlayerCount; ++seat) {
-        const bool wins = !terminal.winner_seat || *terminal.winner_seat == seat;
-        const double share = wins ? 1.0 / winners : 0.0;
-        utility[seat] = (kSeats * share - 1.0) / (kSeats - 1.0);
+std::optional<std::uint8_t> sole_winner(const SeatMask winners) noexcept {
+    if (winners == 0 || (winners & (winners - 1)) != 0) return std::nullopt;
+    std::uint8_t seat = 0;
+    while (!contains(winners, seat)) ++seat;
+    return seat;
+}
+
+std::array<double, kMaxPlayers> seat_utilities(const std::uint8_t player_count, const SeatMask winners) {
+    if (!supported_player_count(player_count)) throw std::invalid_argument("player count is unsupported");
+    const double seats = static_cast<double>(player_count);
+    // No winner is a tie of every seat.
+    const SeatMask sharing = winners == 0 ? static_cast<SeatMask>((1U << player_count) - 1) : winners;
+    std::size_t count = 0;
+    for (std::size_t seat = 0; seat < player_count; ++seat) count += contains(sharing, seat) ? 1 : 0;
+    std::array<double, kMaxPlayers> utility{};
+    for (std::size_t seat = 0; seat < player_count; ++seat) {
+        const double share = contains(sharing, seat) ? 1.0 / static_cast<double>(count) : 0.0;
+        utility[seat] = (seats * share - 1.0) / (seats - 1.0);
     }
     return utility;
 }
@@ -218,7 +235,7 @@ TransitionResult apply_generated_candidate(
     }
     ++next.game_ply;
     next.current_player = static_cast<std::uint8_t>(
-        (next.starting_player + next.game_ply) % kPlayerCount);
+        (next.starting_player + next.game_ply) % next.player_count);
 
     TransitionResult result;
     result.state = std::move(next);

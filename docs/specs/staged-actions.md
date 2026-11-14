@@ -12,15 +12,18 @@ tags:
 
 ## Scope
 
-`splendor-staged-action-v1` defines decisions for `splendor-game-2p-v1`.
-Games start from ordinary setup or a validated supplied MAIN state.
+`splendor-staged-action-v1` defines decisions for the games of every seat count
+(`game_contract(n)` for two to four seats). Games start from ordinary setup or a
+validated supplied MAIN state.
 [turn.hpp](../../include/splendor/turn.hpp) owns the executable boundary;
 [observations](observations.md) owns seat knowledge.
 
 ## Game rules
 
 Colors are `[white, blue, green, red, black, gold]`; costs/bonuses omit gold.
-Two-player supply is four of each gem color and five gold. The game fixes:
+The supply is four of each gem color with two seats, five with three and seven with four,
+and five gold; setup reveals one noble more than the seats. One setup seed deals the same
+decks and noble order at every seat count. The game fixes:
 
 - A take is three tokens of different colors (one of each available non-gold color when
   fewer than three are available, never fewer), or two of one color from a pile of at
@@ -33,12 +36,16 @@ Two-player supply is four of each gem color and five gold. The game fixes:
 - All legal payments after bonuses are choices; gold may pay for any color, even one the
   payer holds. Overflow returns reach exactly ten tokens. Noble choice and draw placement
   follow the staged turn below.
-- Reaching 15 prestige triggers the final round. Finish when both seats have equal
-  turns, immediately before returning to the starting player. Greatest prestige,
-  then fewer purchased cards, wins; equality draws.
+- Reaching 15 prestige triggers the final round. Finish when every seat has had equal
+  turns, immediately before returning to the starting player. The winners are the seats of
+  greatest prestige and, among them, fewest purchased cards; seats still equal share the
+  win (with two seats, a draw).
 - `max_game_plies` is an explicit positive uint32 safety limit counting completed
   turns from zero, not the objective. Equal-turn target termination wins precedence
   over a simultaneous cap; cap-only termination has no winner.
+- Outcome law: a seat's utility is `u_i = (N r_i - 1) / (N - 1)` for its win share
+  `r_i = 1/m` of the `m` winners among `N` seats (`seat_utilities`). A sole winner scores 1
+  and every other seat `-1/(N-1)`; no winner is an N-way tie worth 0 to every seat.
 
 ## Turn
 
@@ -157,13 +164,11 @@ undrawn. Blind reservations have no leaf. Players of
 complete leaves use this adapter; they do not choose again at CLEANUP.
 Consumers that project leaf targets or evaluate staged choices own those projections.
 
-## Player-count readiness
-
-Three- and four-player games are planned; these constraints keep them an extension:
+## Seat counts
 
 - Actor, observer and owner are distinct seat arguments in the engine, observation,
   and their consumers; nothing in the engine assumes `other == 1 - seat`.
 - Cyclic seat order and equal-turn termination are the only seat arithmetic.
-- Terminal utilities are seat-indexed vectors (`terminal_utilities`); nothing flips signs.
+- Terminal utilities are seat-indexed vectors and winners a seat set; nothing flips signs.
 - The gain/give normal form and the action tree read only the bank and the hand: larger
   supplies change only which gains exist and more nobles only CLEANUP, never the tree's form.

@@ -12,7 +12,7 @@ MAX_GAME_PLIES = 160
 
 
 def _play(setup_seed: int, episode_seed: int, policy: random.Random):
-    episode = Episode(CATALOG, MAX_GAME_PLIES, setup_seed, episode_seed)
+    episode = Episode(CATALOG, 2, MAX_GAME_PLIES, setup_seed, episode_seed)
     trace = episode.drain_trace()
     while not episode.is_terminal():
         details = json.loads(episode.choice_details())
@@ -41,7 +41,7 @@ def _play(setup_seed: int, episode_seed: int, policy: random.Random):
 @pytest.mark.parametrize("seed", range(6))
 def test_discretionary_keys_replay_the_trace_and_its_forced_steps(seed: int) -> None:
     episode, trace = _play(seed, seed + 101, random.Random(seed))
-    replay = Episode(CATALOG, MAX_GAME_PLIES, seed, seed + 101)
+    replay = Episode(CATALOG, 2, MAX_GAME_PLIES, seed, seed + 101)
     replayed = replay.drain_trace()
     for step in trace:
         if not step["forced"]:

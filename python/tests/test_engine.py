@@ -17,7 +17,7 @@ MAX_GAME_PLIES = 160
 
 def _episode(seed: int) -> Episode:
     return Episode(
-        Catalog.standard(), MAX_GAME_PLIES, derive64(seed, "setup"), derive64(seed, "episode")
+        Catalog.standard(), 2, MAX_GAME_PLIES, derive64(seed, "setup"), derive64(seed, "episode")
     )
 
 

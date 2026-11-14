@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
 
 from splendor_game import (
-    GAME_CONTRACT, STAGED_ACTION_CONTRACT, Catalog, Clock, Episode, derive64,
+    GAME_CONTRACTS, STAGED_ACTION_CONTRACT, Catalog, Clock, Episode, derive64,
 )
 from splendor_play._fields import closed, uint
 from splendor_play.actions import describe_choice
@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 # The log schema this host writes and restores. A composer persists logs under its own
 # contract name for this schema (`MatchSetup.log_contract`).
 VERSUS_LOG_SCHEMA = "splendor-versus-log-v1"
+# One human and one agent.
+PLAYER_COUNT = 2
 SETUP_SEED_DOMAIN = "versus-setup"
 EPISODE_SEED_DOMAIN = "versus-episode"
 _TIMEOUT_POLICIES = ("flag", "forfeit")
@@ -177,6 +179,7 @@ class Match:
         self._game_catalog = catalog
         self._episode = Episode(
             catalog,
+            PLAYER_COUNT,
             setup.max_game_plies,
             self._setup_seed,
             self._episode_seed,
@@ -446,7 +449,7 @@ class Match:
     def _log(self, *, player: bool) -> dict[str, Any]:
         return {
             "log_contract": self._setup.log_contract,
-            "game_contract": GAME_CONTRACT,
+            "game_contract": GAME_CONTRACTS[PLAYER_COUNT],
             "candidate_contract": STAGED_ACTION_CONTRACT,
             "catalog": {
                 "contract": self._game_catalog.contract,
@@ -547,6 +550,7 @@ class Match:
         """
         episode = Episode(
             self._game_catalog,
+            PLAYER_COUNT,
             self._setup.max_game_plies,
             self._setup_seed,
             self._episode_seed,
@@ -601,10 +605,10 @@ class Match:
             loser = self._episode.current_player()
             if not (
                 self._clock.loses_on_time(loser)
-                and _same_json(log["result"], self._episode.timeout_result(loser))
+                and _same_json(log["result"], json.loads(self._episode.timeout_result(loser)))
             ):
                 raise ValueError("the log's result is not its replayed game's")
-            self._status, self._result = "finished", self._episode.timeout_result(loser)
+            self._status, self._result = "finished", json.loads(self._episode.timeout_result(loser))
         else:
             self._status = "paused"
         self._touch()
@@ -668,6 +672,7 @@ class Match:
         result = self._episode.adjudicate_timeout(self._clock, now)
         if result is None:
             return
+        result = json.loads(result)
         self._halt()
         self._clock.stop(now)
         self._status = "finished"

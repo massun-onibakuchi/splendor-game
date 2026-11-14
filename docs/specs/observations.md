@@ -66,7 +66,7 @@ tell them apart. Consumers keep the property for everything they derive from a v
 seat's, and [play](play.md#hidden-cards) owns its disclosure to a human. Observation cannot
 recover a world: consumers that need one sample it.
 
-## Player-count readiness
+## Seat counts
 
 Observation takes an observer seat and every reserve an owner; concealed cards of several
 other seats are allocated jointly from one unknown set without replacement. Nothing here

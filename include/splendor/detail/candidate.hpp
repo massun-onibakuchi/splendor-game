@@ -15,13 +15,12 @@ using TokenCounts = std::array<int, kTokenColorCount>;
 // Appends `encode_action_key(descriptor)` to `output`.
 void append_action_key(std::string& output, const CandidateDescriptor& descriptor);
 
-// Appends the visible noble slots the supplied bonuses qualify for, in ascending order.
-template <typename Slot>
-void append_eligible_nobles(
+// The visible noble slots the supplied bonuses qualify for.
+inline SlotMask eligible_noble_mask(
     const State& state,
     const Catalog& catalog,
-    const std::array<std::uint8_t, kGemColorCount>& bonuses,
-    std::vector<Slot>& out) {
+    const std::array<std::uint8_t, kGemColorCount>& bonuses) {
+    SlotMask mask = 0;
     for (std::size_t slot = 0; slot < state.noble_ids.size(); ++slot) {
         if (!state.noble_ids[slot]) continue;
         const Noble& noble = catalog.noble(*state.noble_ids[slot]);
@@ -29,7 +28,21 @@ void append_eligible_nobles(
         for (std::size_t color = 0; color < kGemColorCount; ++color) {
             eligible = eligible && bonuses[color] >= noble.requirements[color];
         }
-        if (eligible) out.push_back(static_cast<std::uint8_t>(slot));
+        if (eligible) mask = static_cast<SlotMask>(mask | (1U << slot));
+    }
+    return mask;
+}
+
+// Appends the visible noble slots the supplied bonuses qualify for, in ascending order.
+template <typename Slot>
+void append_eligible_nobles(
+    const State& state,
+    const Catalog& catalog,
+    const std::array<std::uint8_t, kGemColorCount>& bonuses,
+    std::vector<Slot>& out) {
+    const SlotMask mask = eligible_noble_mask(state, catalog, bonuses);
+    for (std::size_t slot = 0; slot < kMaxVisibleNobles; ++slot) {
+        if (contains(mask, slot)) out.push_back(static_cast<std::uint8_t>(slot));
     }
 }
 

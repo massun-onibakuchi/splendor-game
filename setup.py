@@ -74,7 +74,7 @@ class GameBuildExt(build_ext):
 setup(
     ext_modules=cythonize([Extension(
         "splendor_game.engine", ["python/splendor_game/engine.pyx"],
-        libraries=["splendor_game"],
+        libraries=["splendor_play", "splendor_game"],
         runtime_library_dirs=["@loader_path/_core/lib" if sys.platform == "darwin" else "$ORIGIN/_core/lib"],
         language="c++", extra_compile_args=["-std=c++20", "-O2", "-Wall", "-Wextra", "-Wpedantic"],
     )], compiler_directives={"language_level": 3}, include_path=[str(ROOT / "python")]),

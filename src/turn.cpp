@@ -189,11 +189,11 @@ public:
         for (std::size_t bought = 0; bought <= kGemColorCount; ++bought) {
             std::array<std::uint8_t, kGemColorCount> bonuses = held;
             if (bought < kGemColorCount) ++bonuses[bought];
-            detail::append_eligible_nobles(state, catalog, bonuses, sets_[bought]);
+            sets_[bought] = detail::eligible_noble_mask(state, catalog, bonuses);
         }
     }
 
-    const std::vector<std::uint8_t>& of(const CandidateDescriptor& primary) const {
+    SlotMask of(const CandidateDescriptor& primary) const {
         // Exhaustive on purpose: a new primary family must state whether it changes
         // the bonuses that noble eligibility reads.
         switch (primary.family) {
@@ -212,18 +212,17 @@ public:
 
 private:
     const Catalog& catalog_;
-    std::array<std::vector<std::uint8_t>, kGemColorCount + 1> sets_;
+    std::array<SlotMask, kGemColorCount + 1> sets_{};
 };
 
-// Overwrites every field of a MAIN choice. A choice reused from an earlier set keeps its
-// vector capacity, so refilling it does not allocate.
+// Overwrites every field of a MAIN choice.
 void assign_main_choice(
     TurnChoice& choice,
     const EligibleNobles& eligible,
     const CandidateDescriptor& primary) {
     choice.phase = DecisionPhase::Main;
     choice.primary = primary;
-    choice.eligible_noble_slots = eligible.of(primary);
+    choice.eligible_nobles = eligible.of(primary);
     choice.returned = {};
     choice.noble_slot.reset();
 }
@@ -389,7 +388,7 @@ ValidationResult validate_decision(
         if (!result) return result;
         // The actor always knows its own reserves: a decision offered to a seat whose
         // reserve identities are missing has no authoritative choice set.
-        if (state.current_player < kPlayerCount && !knows_own_reserves(state, state.current_player)) {
+        if (state.current_player < state.player_count && !knows_own_reserves(state, state.current_player)) {
             return invalid("the acting seat's reserve identities are unknown");
         }
         return result;
@@ -476,6 +475,8 @@ MainOutcome apply_main(
     const detail::CleanupSupport cleanup = detail::cleanup_support(outcome.state, catalog);
     if (cleanup.count == 0) throw std::logic_error("a primary effect has no cleanup");
     outcome.cleanup_count = cleanup.count;
+    outcome.forced_return = cleanup.forced_return;
+    outcome.forced_noble = cleanup.forced_noble;
     if (cleanup.count == 1) {
         // A forced cleanup's terminal facts read prestige, purchases and the ply,
         // never the market or a reserve's identity, so an ending turn is adjudicated
@@ -650,7 +651,7 @@ void fill_cleanup_choices(
         const TokenCounts& variant = returns[index / nobles.size()];
         choice.phase = DecisionPhase::Cleanup;
         choice.primary = kNoPrimary;
-        choice.eligible_noble_slots.clear();
+        choice.eligible_nobles = 0;
         for (std::size_t color = 0; color < kTokenColorCount; ++color) {
             choice.returned[color] = static_cast<std::uint8_t>(variant[color]);
         }
@@ -925,7 +926,7 @@ std::optional<TerminalFacts> finish_turn_state(
     }
     ++state.game_ply;
     state.current_player =
-        static_cast<std::uint8_t>((state.starting_player + state.game_ply) % kPlayerCount);
+        static_cast<std::uint8_t>((state.starting_player + state.game_ply) % state.player_count);
     return terminal_facts(state, max_game_plies);
 }
 

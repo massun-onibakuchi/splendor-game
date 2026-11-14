@@ -35,7 +35,7 @@ public:
 
 private:
     std::uint64_t episode_{};
-    std::array<std::uint64_t, kPlayerCount> policy_{};
+    std::array<std::uint64_t, kMaxPlayers> policy_{};
 };
 
 // Atomic adapter: plays the acting seat's `selected` complete effective leaf, generated

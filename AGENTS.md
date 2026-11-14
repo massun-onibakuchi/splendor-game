@@ -21,9 +21,9 @@ Native Splendor engine (`include/`, `src/`, C++20), its Cython binding
 - **Fast paths stay native.** No Python object per choice or per state on any bulk path;
   expose buffers. Measure engine changes with `benchmarks/playout_benchmark.cpp`; a
   checksum change means play changed.
-- **Seats are arguments**, not `1 - seat` arithmetic: three and four players are planned.
+- **Design for 2–4 players.** Two players are supported today; three and four are
+  planned. Shape rules, state, views and surfaces around that known change.
 
 ## Docs
 
-[`docs/specs/`](docs/specs/spec.md) holds the normative contracts; change a spec in the
-same change as its contract.
+[`docs/specs/`](docs/specs/spec.md) holds the normative contracts, one per subsystem.

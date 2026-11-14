@@ -16,6 +16,16 @@ from setuptools.command.build_ext import build_ext
 ROOT = Path(__file__).resolve().parent
 
 
+def macos_target() -> str:
+    """The interpreter's (or the environment's) deployment target, raised to 10.15: the
+    first macOS whose libc++ ships the `std::filesystem` the public API takes."""
+    target = os.environ.get("MACOSX_DEPLOYMENT_TARGET") or sysconfig.get_config_var("MACOSX_DEPLOYMENT_TARGET")
+    return target if tuple(map(int, target.split("."))) >= (10, 15) else "10.15"
+
+
+MACOS_TARGET = macos_target() if sys.platform == "darwin" else None
+
+
 def build_native() -> Path:
     """Configure, build and install the shared `splendor::game` library; returns the
     install prefix. The build directory is keyed by the toolchain environment."""
@@ -42,8 +52,7 @@ def build_native() -> Path:
         if not archs:
             arch = sysconfig.get_platform().rsplit("-", 1)[-1]
             archs = ["arm64", "x86_64"] if arch == "universal2" else [arch]
-        target = toolchain["MACOSX_DEPLOYMENT_TARGET"] or sysconfig.get_config_var("MACOSX_DEPLOYMENT_TARGET")
-        args += [f"-DCMAKE_OSX_ARCHITECTURES={';'.join(archs)}", f"-DCMAKE_OSX_DEPLOYMENT_TARGET={target}"]
+        args += [f"-DCMAKE_OSX_ARCHITECTURES={';'.join(archs)}", f"-DCMAKE_OSX_DEPLOYMENT_TARGET={MACOS_TARGET}"]
     binary = str(Path(cmake.CMAKE_BIN_DIR) / "cmake")
     prefix = build / "install"
     subprocess.run([binary, *args], check=True)
@@ -72,10 +81,13 @@ class GameBuildExt(build_ext):
 
 
 def _extension(name: str, source: str, libraries: list[str], core: str) -> Extension:
+    # After the interpreter's own flags, so its older `-mmacosx-version-min` is overridden.
+    macos = [f"-mmacosx-version-min={MACOS_TARGET}"] if MACOS_TARGET else []
     return Extension(
         name, [source], libraries=libraries,
         runtime_library_dirs=[f"@loader_path/{core}" if sys.platform == "darwin" else f"$ORIGIN/{core}"],
-        language="c++", extra_compile_args=["-std=c++20", "-O2", "-Wall", "-Wextra", "-Wpedantic"],
+        language="c++", extra_compile_args=["-std=c++20", "-O2", "-Wall", "-Wextra", "-Wpedantic", *macos],
+        extra_link_args=macos,
     )
 
 

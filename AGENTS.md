@@ -14,6 +14,7 @@ Native Splendor engine (`include/`, `src/`, C++20), its Cython binding
 
 - **Independent.** Nothing here imports, links or names model, search, feature, training
   or experiment code. Consumers build on the engine.
+- **Trusted fast paths** stay in `splendor/detail/` and trust only engine-produced inputs.
 - **Fast paths stay native.** No Python object per choice or per state on any bulk path;
   expose buffers. Measure engine changes with `benchmarks/playout_benchmark.cpp`; a
   checksum change means play changed.

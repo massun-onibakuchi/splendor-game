@@ -1,8 +1,7 @@
 # AGENTS.md
 
-Native Splendor engine (`include/`, `src/`, C++20), its Cython binding
-(`python/splendor_game`) and the native practical-play host (`include/splendor/play`,
-`src/play`, driven from `python/splendor_play`).
+Native Splendor engine and practical-play host (`include/`, `src/`, C++20), its Cython
+binding (`python/splendor_game`) and the host's Python driver (`python/splendor_play`).
 
 ## Environment
 
@@ -19,8 +18,8 @@ Native Splendor engine (`include/`, `src/`, C++20), its Cython binding
 - **Fast paths stay native.** No Python object per choice or per state on any bulk path;
   expose buffers. Measure engine changes with `benchmarks/playout_benchmark.cpp`; a
   checksum change means play changed.
-- **Every seat count.** Games of two to four seats share one state layout and one API;
-  seat arithmetic reads the state's own count. Nothing assumes two seats.
+- **Design for 2–4 players.** Two to four seats are supported; rules, state, views and
+  surfaces never assume two.
 
 ## Docs
 

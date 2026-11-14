@@ -1,9 +1,8 @@
 # splendor-game
 
-Native Splendor for two to four seats and agents of any kind: a C++20 game engine with staged
+Native Splendor for two to four players and agents of any kind: a C++20 game engine with staged
 decisions, legal-choice surfaces, chance, seat views, replay and match clocks; Python
-bindings; and a native practical-play host for matches between humans and agents in any
-combination.
+bindings; and a practical-play host for matches of humans and agents.
 
 Contracts live in [docs/specs](docs/specs/spec.md).
 
@@ -13,7 +12,7 @@ Contracts live in [docs/specs](docs/specs/spec.md).
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
-./build/splendor_game_benchmark 3000 1 2  # uniform playouts (games, seed, seats): staged, recorded, atomic
+./build/splendor_game_benchmark 3000      # uniform playouts: staged, recorded, atomic
 
 uv sync
 uv run pytest
@@ -32,9 +31,7 @@ target_link_libraries(your_target PRIVATE splendor::game)
 
 `splendor/episode.hpp` is the recorded game a host drives; `splendor/turn.hpp`,
 `splendor/choice_columns.hpp` and `splendor/detail/*.hpp` are the surfaces and trusted
-fast paths batched producers and searches build on. `splendor::play` adds the native match
-host (`splendor/play/match.hpp`) and the JSON renderings hosts and boards share
-(`splendor/play/render.hpp`).
+fast paths batched producers and searches build on.
 
 Any catalog of the standard shape loads; its identity is its declared contract and payload
 digest. Every seed derives from the seed law, whose domain-separation tag is the build
@@ -55,6 +52,5 @@ print(episode.terminal())
 ```
 
 Native extensions `cimport splendor_game.engine` and link the shared library under
-`splendor_game.NATIVE_PREFIX`. `splendor_play` serves a match whose seats are any mix of
-humans and agents: `make_server(setup, agents, static=..., catalog_path=...,
-archive=Archive(...), ...)`.
+`splendor_game.NATIVE_PREFIX`. `splendor_play` serves a match of humans and agents:
+`make_server(setup, agents, static=..., catalog_path=..., archive=Archive(...), ...)`.

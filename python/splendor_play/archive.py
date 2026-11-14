@@ -69,10 +69,10 @@ def _summary(log: Mapping[str, Any], log_contract: str) -> dict[str, Any]:
     human = log["human_seat"]
     if result is None:
         outcome = None
-    elif result["winner_seat"] is None:
+    elif len(result["winners"]) != 1:
         outcome = "draw"
     else:
-        outcome = "human" if result["winner_seat"] == human else "model"
+        outcome = "human" if result["winners"] == [human] else "model"
     return {
         "game_id": log["game_id"],
         "started_at": log["started_at"],

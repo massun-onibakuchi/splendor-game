@@ -35,7 +35,8 @@ std::string choices_json(std::span<const TurnChoice> choices, const State& state
 // A MAIN decision's official gem takes before any return; empty at CLEANUP.
 std::string token_takes_json(const Decision& decision);
 
-// `{reason, winner_seat, final_prestige}`.
+// `{reason, winners, final_prestige, purchased_cards, timed_out_seat}`, seat-indexed arrays
+// holding the seated seats.
 std::string result_json(const MatchResult& result);
 
 // The catalog as display records indexed by ID: `{cards: [{id, tier, bonus, prestige, cost}],

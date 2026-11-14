@@ -38,11 +38,12 @@ std::span<const T> head(const std::array<T, N>& values, const std::size_t count)
 constexpr std::array<std::string_view, kTokenColorCount> kColorNames{
     "white", "blue", "green", "red", "black", "gold"};
 
-std::string terminal_json(const TerminalFacts& terminal) {
-    return "{\"reason\":\"" + std::string(match_termination_name(match_result(terminal).reason))
-        + "\",\"winner_seat\":" + json(sole_winner(terminal.winners))
-        + ",\"final_prestige\":" + json(head(terminal.final_prestige, terminal.player_count))
-        + ",\"purchased_cards\":" + json(head(terminal.purchased_cards, terminal.player_count)) + '}';
+std::vector<std::uint8_t> seats_of(const SeatMask mask, const std::uint8_t player_count) {
+    std::vector<std::uint8_t> seats;
+    for (std::uint8_t seat = 0; seat < player_count; ++seat) {
+        if (contains(mask, seat)) seats.push_back(seat);
+    }
+    return seats;
 }
 
 // `count color` for each colour whose signed count is positive, or "nothing".
@@ -108,7 +109,7 @@ std::string board_json(
             + ",\"noble_count\":" + json(player.noble_count)
             + ",\"reserves\":" + rendered + "]}";
     }
-    out += "],\"terminal\":" + (terminal ? terminal_json(*terminal) : std::string("null"));
+    out += "],\"terminal\":" + (terminal ? result_json(match_result(*terminal)) : std::string("null"));
     return out + '}';
 }
 
@@ -161,8 +162,10 @@ std::string token_takes_json(const Decision& decision) {
 
 std::string result_json(const MatchResult& result) {
     return "{\"reason\":\"" + std::string(match_termination_name(result.reason))
-        + "\",\"winner_seat\":" + json(sole_winner(result.winners))
-        + ",\"final_prestige\":" + json(head(result.final_prestige, result.player_count)) + '}';
+        + "\",\"winners\":" + json(seats_of(result.winners, result.player_count))
+        + ",\"final_prestige\":" + json(head(result.final_prestige, result.player_count))
+        + ",\"purchased_cards\":" + json(head(result.purchased_cards, result.player_count))
+        + ",\"timed_out_seat\":" + json(result.timed_out_seat) + '}';
 }
 
 std::string catalog_json(const Catalog& catalog) {

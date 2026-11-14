@@ -174,8 +174,7 @@ class Match:
 
     def _launch(self, due: Any) -> None:
         job = Job(due.id, due.kind, due.seat, due.root_actor, due.position)
-        # The agent reads the job's decision and the clock now, under the lock, so draining
-        # the previous job spends a move's own time.
+        # Started now, so draining the previous job spends a move's own time.
         thought = self._agents[due.seat].start(
             job, self._native.job_episode(), self._native.clock(), _now())
         thread = threading.Thread(target=self._run, args=(job, thought, self._last_thread), daemon=True)

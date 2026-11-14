@@ -536,7 +536,6 @@ void Match::play_agent(
         search.set("pondered_simulations", Json(ponder_work_[finished.seat]));
         search.set("think_ms", Json(elapsed));
     }
-    // A move without a report leaves no last search: an earlier one is not this move's.
     last_search_ = search;
     move_work_[finished.seat] = 0;
     ponder_work_[finished.seat] = 0;

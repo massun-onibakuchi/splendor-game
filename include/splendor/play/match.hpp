@@ -12,12 +12,11 @@
 #include <vector>
 
 // One practical match between seats of any kind (docs/specs/play.md): each seat is a human,
-// who submits validated keys through the host's commands, or an agent, an offered actor the
-// host language runs whenever the match schedules a job for its seat. An agent's move is a
-// choice index, with a report only if it has one: the host asks nothing of how it decides.
-// The match owns the game, its clock, turn order, the agents' job schedule, analysis
-// visibility, the log and its replay; a host language supplies wall and monotonic time, runs
-// agents and persists logs. It is not thread-safe: a host serializes every call.
+// who submits validated keys, or an agent, whose jobs the host runs and whose selections
+// arrive as choice indexes. The match owns the game, its clock, turn order, the agents' job
+// schedule, analysis visibility, the log and its replay; a host language supplies wall and
+// monotonic time, runs agent jobs and persists logs. It is not thread-safe: a host
+// serializes every call.
 namespace splendor::play {
 
 // The log schema this host writes and restores; a composer persists logs under its own
@@ -45,12 +44,11 @@ struct MatchHost {
     std::vector<Actor> actors;
 };
 
-// The host description a host language supplies as JSON: `{log_contract, max_game_plies,
-// conditions, actors: [{name, identity, summary}]}`.
+// `{log_contract, max_game_plies, conditions, actors: [{name, identity, summary}]}`.
 MatchHost parse_host(const Json& description);
 
-// One participant: a human, or an offered actor. A pondering agent runs a job of its own
-// while a human seat decides.
+// One participant: a human, or an offered actor. A pondering agent runs while a human
+// seat decides.
 struct Seat {
     SeatKind kind{};
     std::string name;
@@ -75,10 +73,10 @@ MatchSettings parse_settings(const Json& request, const MatchHost& host);
 enum class MatchStatus : std::uint8_t { Ready, Running, Paused, Finished };
 enum class JobKind : std::uint8_t { Move, Ponder, Review };
 
-// The work a host language should be running for an agent seat: its own move, its pondering
-// of a human's decision, or a finished game's analysis of a reviewed position. `root_actor`
-// is the job's decision's actor; `concealed` says that actor held a card another seat could
-// not identify, so a report is that seat's knowledge alone.
+// The job a host should be running: an agent's own move, its pondering of a human's
+// decision, or a finished game's analysis of a reviewed position. `root_actor` is the
+// job's decision's actor; `concealed` says that actor held a card another seat could not
+// identify, so the report is that seat's knowledge alone.
 struct Job {
     std::uint64_t id{};
     JobKind kind{};
@@ -113,18 +111,16 @@ public:
     // Analyzes a finished game's reviewed position; none stops the analysis.
     void analyze(std::optional<std::size_t> position);
 
-    // The job the host language should run, if any, and the episode of its decision: shared,
-    // so a holder keeps a review position's episode after the next analysis replaces it.
+    // The job the host should run, if any, and the episode it runs on: shared, so a
+    // holder keeps a review position's episode after the next analysis replaces it.
     const std::optional<Job>& job() const noexcept { return job_; }
     std::shared_ptr<const TurnEpisode> job_episode() const;
-    // A job's progress for display: a JSON report object and the simulations (or other work
-    // units) spent since the last one.
+    // One slice of a job: its JSON report object and the simulations it completed.
     void publish(std::uint64_t job, std::string_view report, std::uint64_t simulations);
     // A ponder or review job ended without a selection.
     void finish(std::uint64_t job, double now_ms);
-    // A move job's selection: an index into the legal choices of the job's decision, which
-    // is still pending while the job is current, with the agent's final JSON report object,
-    // if it reports.
+    // A move job's selection, an index into the pending decision's legal choices, with its
+    // report, if any.
     void play_agent(
         std::uint64_t job, std::size_t choice, std::optional<std::string_view> report, double now_ms);
     void fail(std::uint64_t job, std::string_view error, double now_ms);

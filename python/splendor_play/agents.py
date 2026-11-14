@@ -1,9 +1,4 @@
-"""The play host's agent contract: what a match asks of the seats it does not drive itself.
-
-An agent decides; how is its own. The host starts one job at a time for an agent seat (its
-own move, a pondering of a human's decision, or a finished game's review); a move returns a
-choice index, and reports are optional evidence for display.
-"""
+"""The play host's agent contract: what a match asks of the seats it does not drive itself."""
 from __future__ import annotations
 
 import threading
@@ -13,8 +8,6 @@ from typing import Any, Protocol
 
 from splendor_game import Clock, Episode
 
-# Publishes a job's progress for display: a JSON report object as text, and the work units
-# (simulations, for a search) spent since the previous report.
 Publish = Callable[[str, int], None]
 
 
@@ -41,14 +34,9 @@ class MatchSetup(Protocol):
 
 
 class Job:
-    """One job of an agent seat: `kind` is `move`, `ponder` or `review`; `root_actor` is the
-    actor of the job's decision (the seat itself for its own moves, a human it ponders, or
-    either in a finished game's review); `position` is a review's history position.
-
-    The host ends a job that is no longer due; `ended` says so, and every callback given to
-    `on_end` runs once at the end, from the ending thread, so an agent can interrupt work in
-    progress.
-    """
+    """One job of an agent seat. `root_actor` is the job's decision's actor: the seat itself
+    for its own moves, a human it ponders, or either in a finished game's review. Callbacks
+    given to `on_end` run when the host ends the job."""
 
     def __init__(self, id: int, kind: str, seat: int, root_actor: int,
                  position: int | None = None) -> None:
@@ -66,7 +54,6 @@ class Job:
         return self._ended.is_set()
 
     def on_end(self, callback: Callable[[], None]) -> None:
-        """Run `callback` when the job ends, at once if it already has."""
         with self._lock:
             if not self._ended.is_set():
                 self._on_end.append(callback)
@@ -83,16 +70,14 @@ class Job:
 
 @dataclass(frozen=True)
 class Move:
-    """A move job's selection: an index into the legal choices of the job's decision, and the
-    agent's final JSON report object as text, if it reports."""
+    """`choice` indexes the legal choices of the job's decision."""
 
     choice: int
     report: str | None = None
 
 
 class Thought(Protocol):
-    """One started job, run off the host's lock. It returns a `Move` for a move job and
-    `None` otherwise, once it decides or its job ends; `publish` shows progress meanwhile."""
+    """A started job, run off the host's lock: a move job returns a `Move`, others `None`."""
 
     def run(self, publish: Publish) -> Move | None: ...
 
@@ -100,11 +85,8 @@ class Thought(Protocol):
 class Agent(Protocol):
     """One actor's play at one seat of one match, driven by the host.
 
-    `warm` prepares the agent (a model session, caches) before any clock runs. `start` runs
-    under the host's lock: it takes what the job needs from read-only views of the job's
-    decision and the match clock at `now_ms` -- views that expire when it returns -- and
-    returns the `Thought` the host then runs. The host binds a move to the job's decision,
-    so a stale job's move is discarded.
+    `start` runs under the host's lock with read-only views that expire when it returns.
+    Reports are display and evidence only, never commands.
     """
 
     def warm(self, episode: Episode) -> None: ...

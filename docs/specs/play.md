@@ -11,19 +11,17 @@ tags: [specs, game, play]
 ## Scope
 
 [`splendor::play::Match`](../../include/splendor/play/match.hpp) hosts one match between seats
-of any kind: humans, who submit validated keys, and agents, offered actors the host language
-runs. It owns turn order, clocks, submissions, pausing, the agents' job schedule, analysis
+of any kind: humans, who submit validated keys, and agents, whose jobs the host runs.
+It owns turn order, clocks, submissions, pausing, the agents' job schedule, analysis
 visibility, the match log, its replay and archive listings, and renders every board the
 same way for every host language. Python
 ([`splendor_play`](../../python/splendor_play/__init__.py)) and a WebAssembly build drive the
 same native host; each supplies only wall and monotonic time, runs scheduled jobs on its
-agents, persists logs and serves the board. No host keeps match logic of its own; the host
-description they supply is parsed natively (`parse_host`).
+agents, persists logs and serves the board. No host keeps match logic of its own.
 
 `splendor_play` depends only on `splendor_game` and the standard library. A composer
 supplies the offered actors, their agents, the play conditions and the board's static
-files; the host does not know how an agent decides, whether it searches, or what model it
-runs.
+files; the host does not know how an agent decides or what model it runs.
 
 ## Seats and agents
 
@@ -35,30 +33,25 @@ human is "Human" and an agent its actor's name, and a name several seats would s
 numbered in seat order ("Human 1", "Human 2"; "A #1", "A #2"). Logs, exports and the board
 name seats by it.
 
-[agents.py](../../python/splendor_play/agents.py) owns the agent protocol, which is
-decision-shaped: any policy (a search, a model's direct policy, a rule) plays a seat without
-imitating another kind. An agent warms its session before any clock runs. For each job the
-host starts it under the host's lock with read-only views of the job's decision and the
-running clock, from which it takes what it needs (a detached root, a time allocation); it
-then runs off the lock until it decides or its job ends. A move job returns a choice index
-into the job's decision; ponder and review jobs return nothing. Progress reports (JSON
-objects, with the work spent) and a move's final report are optional; reports are display
-and evidence only, never commands.
+[agents.py](../../python/splendor_play/agents.py) owns the agent protocol. An agent warms
+its session before any clock runs. Each job starts it with read-only views of the job's
+decision and the running clock, then runs until it decides or the job ends; a move is an
+index into the job's decision's legal choices. Reports are optional, display and evidence
+only, never commands.
 
 The native host schedules one job at a time and the host language runs it:
 
 - **Move:** the acting seat is an agent.
 - **Ponder:** a human decides and an agent seat pondering is next in turn order; a human's
   commit records the latest pondered report with the move.
-- **Review:** a finished game's reviewed position, analyzed by its actor when that is an
+- **Review:** a finished game's reviewed position, searched by its actor when that is an
   agent, else by the first agent seat. Review is display-only, never logged or archived.
 
 Only the current job may publish or select; a stale job's work is discarded. Pause ends a
-job and discards its selection; agents keep whatever state they retain. The host
+job and discards its selection; agents keep whatever they retain. The host
 adjudicates time before accepting any selection. Human submissions name the decision's
-revision and are validated keys; an agent's move is an index bound to its job, which the
-host accepts only while that job's decision is pending. Persisted keys remain validated
-inputs. A move without a report logs no search.
+revision and are validated keys; agents' selections are indexes of the current job's
+decision. Persisted keys remain validated inputs.
 
 ## Clocks
 

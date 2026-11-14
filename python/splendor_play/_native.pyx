@@ -63,7 +63,6 @@ cdef extern from *:
     static std::string state(Match& match, std::uint8_t perspective, std::int64_t since, double now_ms) {
         return match.state(perspective, since < 0 ? std::nullopt : std::optional<std::uint64_t>(since), now_ms);
     }
-    // Each seat's kind (0 human, 1 agent) and identity, in seat order.
     struct Seat {
         std::uint8_t kind{};
         std::string identity;
@@ -188,8 +187,7 @@ cdef class HostMatch:
         return match
 
     def seats(self):
-        """Each seat's `(kind, identity)` in seat order: kind `human` or `agent`, identity
-        an agent's offered actor's (`human` for a human)."""
+        """Each seat's `(kind, identity)`, in seat order."""
         return tuple(
             (_SEAT_KINDS[seat.kind], seat.identity.decode("utf-8")) for seat in shim_seats(self._match[0])
         )
@@ -258,7 +256,6 @@ cdef class HostMatch:
         self._match.finish(job, now_ms)
 
     def play_agent(self, uint64_t job, size_t choice, report, double now_ms):
-        """A move job's selection, with the agent's final JSON report text or `None`."""
         cdef optional[string] native
         if report is not None:
             native = <string>(<str>report).encode("utf-8")

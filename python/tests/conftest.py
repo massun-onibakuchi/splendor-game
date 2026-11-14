@@ -26,7 +26,6 @@ _SLICE_LIMIT = 40
 class Actor:
     label: str
     identity: str
-    # A reporting actor 'searches' in reported slices; a silent one decides at once.
     reports: bool = True
 
     def summary(self) -> dict[str, Any]:
@@ -42,8 +41,8 @@ class Setup:
 
 
 class _Thought:
-    """Selects the decision's first legal choice: at once when silent, else after a sliced
-    'search' whose move ends once its fixed budget passes."""
+    """Selects the decision's first legal choice: at once when silent, else after a sliced,
+    reported 'search'."""
 
     def __init__(self, job: Job, keys: tuple[str, ...], reports: bool) -> None:
         self._job = job

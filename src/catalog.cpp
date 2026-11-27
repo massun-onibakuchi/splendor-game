@@ -292,6 +292,7 @@ Catalog Catalog::load(const std::filesystem::path& path) {
             throw std::runtime_error("invalid card identity or category");
         }
         result.cards_[index] = card;
+        result.tiers_[card.tier - 1].insert(card.id);
     }
     for (std::size_t index = 0; index < nobles.size(); ++index) {
         if (nobles[index].id != index) throw std::runtime_error("invalid noble identity");
@@ -307,13 +308,9 @@ void Catalog::throw_unknown_card() { throw std::out_of_range("unknown card id");
 
 void Catalog::throw_unknown_noble() { throw std::out_of_range("unknown noble id"); }
 
-std::vector<std::uint16_t> Catalog::card_ids_for_tier(const std::uint8_t tier) const {
+const CardSet& Catalog::card_ids_for_tier(const std::uint8_t tier) const {
     if (tier < 1 || tier > 3) throw std::invalid_argument("tier must be 1, 2, or 3");
-    std::vector<std::uint16_t> result;
-    for (const Card& card_value : cards_) {
-        if (card_value.tier == tier) result.push_back(card_value.id);
-    }
-    return result;
+    return tiers_[tier - 1];
 }
 
 }  // namespace splendor

@@ -35,7 +35,9 @@ std::size_t reserve_count(const PlayerState& player) noexcept {
 
 TierCounts tier_counts(const State& state, const Catalog& catalog) {
     TierCounts counts;
-    for (const std::uint16_t id : state.unknown_card_ids) ++counts.unknown[catalog.card(id).tier - 1];
+    for (std::uint8_t tier = 1; tier <= kTierCount; ++tier) {
+        counts.unknown[tier - 1] = (state.unknown_card_ids & catalog.card_ids_for_tier(tier)).size();
+    }
     counts.deck = counts.unknown;
     for (const PlayerState& player : seated(state)) {
         for (const auto& reserve : player.reserves) {
@@ -78,17 +80,14 @@ State observe(const State& state, const std::uint8_t observer) {
         throw std::invalid_argument("state does not carry the observer's own reserve identities");
     }
     State view = state;
-    bool widened = false;
     for (std::uint8_t seat = 0; seat < state.player_count; ++seat) {
         if (seat == observer) continue;
         for (auto& reserve : view.players[seat].reserves) {
             if (!reserve || !reserve->concealed || !reserve->card_id) continue;
-            view.unknown_card_ids.push_back(*reserve->card_id);
+            view.unknown_card_ids.insert(*reserve->card_id);
             reserve->card_id.reset();
-            widened = true;
         }
     }
-    if (widened) std::sort(view.unknown_card_ids.begin(), view.unknown_card_ids.end());
     return view;
 }
 
@@ -133,12 +132,12 @@ ValidationResult validate_state(
         return invalid("state is terminal");
     }
 
-    std::array<bool, kCardCount> seen_cards{};
+    CardSet seen_cards = state.unknown_card_ids;
     // Why a card cannot join the state, or null when it is known and not yet seen.
     auto add_card = [&](const std::uint16_t id) -> const char* {
         if (id >= kCardCount) return " card id is unknown";
-        if (seen_cards[id]) return " card id is duplicated";
-        seen_cards[id] = true;
+        if (seen_cards.contains(id)) return " card id is duplicated";
+        seen_cards.insert(id);
         return nullptr;
     };
     const auto card_failure = [](const char* zone, const char* reason) {
@@ -146,14 +145,8 @@ ValidationResult validate_state(
     };
 
     std::array<std::size_t, kTierCount> unknown_counts{};
-    if (!std::is_sorted(state.unknown_card_ids.begin(), state.unknown_card_ids.end())
-        || std::adjacent_find(state.unknown_card_ids.begin(), state.unknown_card_ids.end())
-            != state.unknown_card_ids.end()) {
-        return invalid("unknown card ids must be strictly ascending");
-    }
-    for (const std::uint16_t id : state.unknown_card_ids) {
-        if (const char* reason = add_card(id)) return card_failure("unknown set", reason);
-        ++unknown_counts[catalog.card(id).tier - 1];
+    for (std::uint8_t tier = 1; tier <= kTierCount; ++tier) {
+        unknown_counts[tier - 1] = (state.unknown_card_ids & catalog.card_ids_for_tier(tier)).size();
     }
     for (std::size_t index = 0; index < state.market_card_ids.size(); ++index) {
         if (!state.market_card_ids[index]) continue;
@@ -198,9 +191,7 @@ ValidationResult validate_state(
             }
         }
     }
-    if (static_cast<std::size_t>(std::count(seen_cards.begin(), seen_cards.end(), true))
-            + purchased_count
-        != kCardCount) {
+    if (seen_cards.size() + purchased_count != kCardCount) {
         return invalid("card conservation failed");
     }
     for (std::size_t tier = 0; tier < kTierCount; ++tier) {
@@ -267,7 +258,8 @@ State initial_state(
 
     std::uint64_t counter = 0;
     for (std::uint8_t tier = 1; tier <= kTierCount; ++tier) {
-        std::vector<std::uint16_t> ids = catalog.card_ids_for_tier(tier);
+        const auto& cards = catalog.card_ids_for_tier(tier);
+        std::vector<std::uint16_t> ids(cards.begin(), cards.end());
         for (std::size_t index = ids.size() - 1; index > 0; --index) {
             const std::size_t other = random_counter(setup_seed, counter++) % (index + 1);
             std::swap(ids[index], ids[other]);
@@ -275,12 +267,8 @@ State initial_state(
         for (std::size_t slot = 0; slot < kMarketSlotsPerTier; ++slot) {
             state.market_card_ids[(tier - 1) * kMarketSlotsPerTier + slot] = ids[slot];
         }
-        state.unknown_card_ids.insert(
-            state.unknown_card_ids.end(),
-            ids.begin() + kMarketSlotsPerTier,
-            ids.end());
+        for (std::size_t i = kMarketSlotsPerTier; i < ids.size(); ++i) state.unknown_card_ids.insert(ids[i]);
     }
-    std::sort(state.unknown_card_ids.begin(), state.unknown_card_ids.end());
 
     std::array<std::uint16_t, kNobleCount> noble_ids{};
     std::iota(noble_ids.begin(), noble_ids.end(), std::uint16_t{0});

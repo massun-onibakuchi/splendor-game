@@ -30,7 +30,7 @@ std::uint64_t EpisodeSeeds::draw(const State& state) const {
 }
 
 std::uint16_t select_episode_chance_card(
-    const std::vector<std::uint16_t>& card_ids,
+    const CardSet& card_ids,
     const std::uint64_t draw_seed) {
     if (card_ids.empty()) throw std::invalid_argument("an owed draw has no outcome");
     const std::uint64_t event_seed = derive64(draw_seed, "episode-chance");

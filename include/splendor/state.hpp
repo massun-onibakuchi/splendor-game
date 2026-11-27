@@ -52,8 +52,7 @@ struct State {
     std::array<PlayerState, kMaxPlayers> players{};
     std::array<std::uint8_t, kTokenColorCount> bank_tokens{};
     std::array<std::optional<std::uint16_t>, kMarketSlotCount> market_card_ids{};
-    // Strictly ascending.
-    std::vector<std::uint16_t> unknown_card_ids;
+    CardSet unknown_card_ids;
     std::array<std::optional<std::uint16_t>, kMaxVisibleNobles> noble_ids{};
     bool operator==(const State&) const = default;
 };
@@ -113,7 +112,7 @@ constexpr bool closes_round(const State& state) noexcept {
 // Per tier, the cards the state cannot place (`unknown`) and, of those, the cards
 // physically in the deck (`deck`): the tier's unknown cards that are not concealed
 // reserves without an identity. Refill and blind-reserve legality read `deck`, never
-// the unknown set. One pass over the unknown set and the reserves.
+// the unknown set. Three set intersections and one pass over the reserves.
 struct TierCounts {
     std::array<std::size_t, kTierCount> unknown{};
     std::array<std::size_t, kTierCount> deck{};

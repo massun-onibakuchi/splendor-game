@@ -162,7 +162,7 @@ struct MainOutcome {
     // The owed tier's unknown cards as `state` knows them, in ascending order, each
     // equiprobable: the physical deck of a complete world, or the marginal law of a
     // seat's view.
-    std::vector<std::uint16_t> outcome_card_ids;
+    CardSet outcome_card_ids;
     // How many joint cleanups follow; the set does not depend on the drawn card.
     std::size_t cleanup_count{};
     // The only cleanup when `cleanup_count` is one, which no decision exposes.

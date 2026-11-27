@@ -35,7 +35,7 @@ private:
 // The environment's draw law: the card an owed draw places, uniform over `card_ids`
 // (`MainOutcome::outcome_card_ids`, ascending) under the turn's draw seed.
 std::uint16_t select_episode_chance_card(
-    const std::vector<std::uint16_t>& card_ids,
+    const CardSet& card_ids,
     std::uint64_t draw_seed);
 
 // What the environment did after a MAIN choice: the draw it owed, the card drawn and the

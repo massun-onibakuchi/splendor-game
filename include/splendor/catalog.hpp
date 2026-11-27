@@ -1,6 +1,6 @@
 #pragma once
 
-#include "splendor/contracts.hpp"
+#include "splendor/card_set.hpp"
 
 #include <array>
 #include <cstdint>
@@ -48,7 +48,7 @@ public:
     }
     const std::array<Card, kCardCount>& cards() const noexcept { return cards_; }
     const std::array<Noble, kNobleCount>& nobles() const noexcept { return nobles_; }
-    std::vector<std::uint16_t> card_ids_for_tier(std::uint8_t tier) const;
+    const CardSet& card_ids_for_tier(std::uint8_t tier) const;
     const std::string& contract() const noexcept { return contract_; }
     const std::string& payload_sha256() const noexcept { return payload_sha256_; }
 
@@ -56,6 +56,7 @@ private:
     [[noreturn]] static void throw_unknown_card();
     [[noreturn]] static void throw_unknown_noble();
 
+    std::array<CardSet, kTierCount> tiers_{};
     std::array<Card, kCardCount> cards_{};
     std::array<Noble, kNobleCount> nobles_{};
     std::string contract_;

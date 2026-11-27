@@ -89,9 +89,7 @@ State noble_ready_root(
         purchased += actor.bonuses[color];
     }
     actor.purchased_cards = static_cast<std::uint8_t>(purchased);
-    root.unknown_card_ids.erase(
-        root.unknown_card_ids.begin(),
-        root.unknown_card_ids.begin() + static_cast<std::ptrdiff_t>(purchased));
+    for (std::size_t i = 0; i < purchased; ++i) root.unknown_card_ids.erase(root.unknown_card_ids.front());
     root.noble_ids[2].reset();
     root.players[1 - root.current_player].noble_count = 1;
     return root;
@@ -203,7 +201,7 @@ TEST(StagedTurn, ReserveCommitsItsGoldAndReturnsAfterTheRefill) {
             cleanup.market_card_ids[splendor::detail::market_index(outcome.draw->tier, outcome.draw->slot)],
             card);
         EXPECT_EQ(cleanup.unknown_card_ids.size() + 1, state.unknown_card_ids.size());
-        decks.insert(cleanup.unknown_card_ids);
+        decks.emplace(cleanup.unknown_card_ids.begin(), cleanup.unknown_card_ids.end());
         const std::vector<TurnChoice> cleanups = choices_of(step.decision, catalog);
         ASSERT_EQ(cleanups.size(), splendor::kTokenColorCount);
         std::set<std::size_t> colors;
@@ -454,8 +452,7 @@ TEST(StagedTurn, TierCardCountChangesTheDrawNotThePrimary) {
         }
         const std::size_t removed = tier_one_deck.size() - kept;
         for (std::size_t index = 0; index < removed; ++index) {
-            state.unknown_card_ids.erase(std::find(
-                state.unknown_card_ids.begin(), state.unknown_card_ids.end(), tier_one_deck[index]));
+            state.unknown_card_ids.erase(tier_one_deck[index]);
         }
         state.players[1 - state.current_player].purchased_cards = static_cast<std::uint8_t>(removed);
         state.players[1 - state.current_player].bonuses[0] = static_cast<std::uint8_t>(removed);
@@ -547,10 +544,8 @@ TEST(StagedTurn, ForcedMainIsFollowedByADiscretionaryCleanup) {
         ASSERT_NE(replacement, state.unknown_card_ids.end());
         const std::uint16_t swapped = *slot;
         slot = *replacement;
-        state.unknown_card_ids.erase(replacement);
-        state.unknown_card_ids.insert(
-            std::lower_bound(state.unknown_card_ids.begin(), state.unknown_card_ids.end(), swapped),
-            swapped);
+        state.unknown_card_ids.erase(*replacement);
+        state.unknown_card_ids.insert(swapped);
     }
     for (auto& reserved : actor.reserves) {
         const auto card = std::find_if(
@@ -558,7 +553,7 @@ TEST(StagedTurn, ForcedMainIsFollowedByADiscretionaryCleanup) {
             [&](const std::uint16_t id) { return !affordable(id); });
         ASSERT_NE(card, state.unknown_card_ids.end());
         reserved = splendor::Reserve{catalog.card(*card).tier, *card, false};
-        state.unknown_card_ids.erase(card);
+        state.unknown_card_ids.erase(*card);
     }
     ASSERT_TRUE(splendor::validate_state(state, kMaxGamePlies, catalog));
     const std::vector<TurnChoice> mains = choices_of(main_decision(state), catalog);
@@ -674,7 +669,7 @@ TEST(StagedTurn, EndingBlindReservationStillDrawsForItsOwner) {
         ASSERT_TRUE(outcome.awaiting_draw()) << "the ending turn still owes the private draw";
         EXPECT_EQ(outcome.draw->kind, splendor::DrawKind::BlindReserve);
         EXPECT_EQ(outcome.draw->owner, owner);
-        const std::uint16_t card = outcome.outcome_card_ids.back();
+        const std::uint16_t card = outcome.outcome_card_ids[outcome.outcome_card_ids.size() - 1];
         const TurnStep ended = splendor::resolve_main(outcome, card, plies, catalog);
         ASSERT_TRUE(ended.terminal.has_value());
         EXPECT_EQ(ended.terminal, outcome.terminal);
@@ -784,7 +779,7 @@ TEST(StagedTurn, BlindReserveDrawsPrivatelyAndRevealsToItsOwnerOnly) {
         for (const std::uint16_t card : state.unknown_card_ids) {
             if (catalog.card(card).tier == tier) expected.push_back(card);
         }
-        EXPECT_EQ(outcome.outcome_card_ids, expected);
+        EXPECT_TRUE(std::ranges::equal(outcome.outcome_card_ids, expected));
         EXPECT_EQ(expected.size(), splendor::tier_counts(state, catalog).deck[tier - 1]);
         EXPECT_EQ(outcome.cleanup_count, splendor::kTokenColorCount) << "the gold overflows";
         // Before the draw the owed slot holds the tier and no identity.
@@ -829,11 +824,11 @@ TEST(StagedTurn, BlindReserveDrawsPrivatelyAndRevealsToItsOwnerOnly) {
     State world = state;
     const std::uint8_t other = static_cast<std::uint8_t>(1 - owner);
     const std::uint16_t theirs = world.unknown_card_ids.front();
-    const std::uint16_t mine = world.unknown_card_ids.back();
+    const std::uint16_t mine = world.unknown_card_ids[world.unknown_card_ids.size() - 1];
     world.players[other].reserves[0] = splendor::Reserve{catalog.card(theirs).tier, theirs, true};
     world.players[owner].reserves[0] = splendor::Reserve{catalog.card(mine).tier, mine, true};
-    std::erase(world.unknown_card_ids, theirs);
-    std::erase(world.unknown_card_ids, mine);
+    world.unknown_card_ids.erase(theirs);
+    world.unknown_card_ids.erase(mine);
     const Decision viewed{splendor::observe(world, owner), DecisionPhase::Main};
     const TurnChoice& blind = find_main(
         choices_of(viewed, catalog), PrimaryFamily::ReserveBlind,
@@ -856,15 +851,15 @@ TEST(StagedTurn, HiddenWorldSwapLeavesTheOtherSeatsDecisionUnchanged) {
     // Same tier, two identities: the only difference between the worlds.
     const std::uint16_t first = left.unknown_card_ids[0];
     const auto same_tier = std::find_if(
-        left.unknown_card_ids.begin() + 1, left.unknown_card_ids.end(),
+        std::next(left.unknown_card_ids.begin()), left.unknown_card_ids.end(),
         [&](const std::uint16_t card) { return catalog.card(card).tier == catalog.card(first).tier; });
     ASSERT_NE(same_tier, left.unknown_card_ids.end());
     const std::uint16_t second = *same_tier;
     State right = left;
     left.players[other].reserves[0] = splendor::Reserve{catalog.card(first).tier, first, true};
-    std::erase(left.unknown_card_ids, first);
+    left.unknown_card_ids.erase(first);
     right.players[other].reserves[0] = splendor::Reserve{catalog.card(second).tier, second, true};
-    std::erase(right.unknown_card_ids, second);
+    right.unknown_card_ids.erase(second);
     ASSERT_NE(left, right);
 
     EXPECT_EQ(splendor::observe(left, actor), splendor::observe(right, actor));
@@ -908,7 +903,7 @@ TEST(StagedTurn, RevealKeepsTheWorldAndRefusesAProjection) {
     const std::uint8_t other = static_cast<std::uint8_t>(1 - actor);
     const std::uint16_t first = left.unknown_card_ids[0];
     left.players[other].reserves[0] = splendor::Reserve{catalog.card(first).tier, first, true};
-    std::erase(left.unknown_card_ids, first);
+    left.unknown_card_ids.erase(first);
     const Decision left_decision{left, DecisionPhase::Main};
 
     const splendor::PlayerView revealed = splendor::reveal(left_decision);

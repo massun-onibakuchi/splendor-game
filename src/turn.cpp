@@ -461,9 +461,7 @@ MainOutcome apply_main(
     if (const std::optional<OwedDraw> owed =
             detail::apply_primary_effect(outcome.state, catalog, choice.primary)) {
         outcome.draw = owed;
-        for (const std::uint16_t id : outcome.state.unknown_card_ids) {
-            if (catalog.card(id).tier == owed->tier) outcome.outcome_card_ids.push_back(id);
-        }
+        outcome.outcome_card_ids = outcome.state.unknown_card_ids & catalog.card_ids_for_tier(owed->tier);
     }
     // Returns read token counts and eligibility reads bonuses; no drawn card changes
     // either, so the cleanup support is known before the draw.
@@ -487,7 +485,7 @@ MainOutcome apply_main(
             outcome.terminal = terminal;
             if (outcome.draw && outcome.draw->kind == DrawKind::Refill) {
                 outcome.draw.reset();
-                outcome.outcome_card_ids.clear();
+                outcome.outcome_card_ids = {};
             }
         }
     }

@@ -109,7 +109,7 @@ TEST(MainChoice, KeysSpellThePrimaryAndAscend) {
         });
     ASSERT_NE(reserved, state.unknown_card_ids.end());
     const std::uint16_t card_id = *reserved;
-    state.unknown_card_ids.erase(reserved);
+    state.unknown_card_ids.erase(*reserved);
     PlayerState& actor = state.players[state.current_player];
     actor.reserves[0] = Reserve{1, card_id, false};
     std::string paid;

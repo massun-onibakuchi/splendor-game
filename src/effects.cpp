@@ -142,9 +142,7 @@ void place_draw(
     const Catalog& catalog,
     const OwedDraw& owed,
     const std::uint16_t card_id) {
-    const auto found = std::lower_bound(
-        state.unknown_card_ids.begin(), state.unknown_card_ids.end(), card_id);
-    if (found == state.unknown_card_ids.end() || *found != card_id
+    if (!state.unknown_card_ids.contains(card_id)
         || catalog.card(card_id).tier != owed.tier) {
         throw std::invalid_argument("card is not a draw outcome of the owed tier");
     }
@@ -165,7 +163,7 @@ void place_draw(
             break;
         }
     }
-    state.unknown_card_ids.erase(found);
+    state.unknown_card_ids.erase(card_id);
 }
 
 std::optional<TerminalFacts> finish_turn_state(

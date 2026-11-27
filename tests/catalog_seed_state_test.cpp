@@ -52,6 +52,21 @@ TEST(CatalogSeedStateTest, TheSeedLawIsItsDefinitionForEveryShapeOfInput) {
     EXPECT_LT(u01(UINT64_MAX), 1.0);
 }
 
+TEST(CardSetTest, DrawRanksAndIterationUseTheSameAscendingOrder) {
+    CardSet cards;
+    for (const auto id : {89, 64, 63, 0, 64, 88}) cards.insert(id);
+    cards.erase(88);
+    const std::vector<std::uint16_t> expected{0, 63, 64, 89};
+    EXPECT_EQ(cards.size(), expected.size());
+    EXPECT_EQ((std::vector<std::uint16_t>{cards.begin(), cards.end()}), expected);
+    for (std::size_t i = 0; i < expected.size(); ++i) EXPECT_EQ(cards[i], expected[i]);
+    cards.erase(0);
+    cards.erase(63);
+    EXPECT_EQ(cards.front(), 64U);
+    EXPECT_FALSE(cards.contains(63));
+    EXPECT_THROW(cards.insert(kCardCount), std::out_of_range);
+}
+
 TEST(CatalogSeedStateTest, ACatalogIsIdentifiedByItsDeclaredContractAndPayload) {
     const Catalog catalog = Catalog::load(SPLENDOR_GAME_CATALOG);
     EXPECT_EQ(catalog.contract(), kCatalogContract);
@@ -91,7 +106,7 @@ TEST(CatalogSeedStateTest, InitialSetupIsDeterministicAndValid) {
     EXPECT_TRUE(validate_state(first, max_game_plies, catalog).valid);
 
     State invalid = first;
-    invalid.unknown_card_ids[1] = invalid.unknown_card_ids[0];
+    invalid.unknown_card_ids.insert(*first.market_card_ids[0]);
     EXPECT_FALSE(validate_state(invalid, max_game_plies, catalog).valid);
 }
 

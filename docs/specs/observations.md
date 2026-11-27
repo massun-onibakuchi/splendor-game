@@ -23,8 +23,8 @@ Blind-reserved identities are private to their owner until purchase.
   set lists every card whose place this state does not know: the deck in a complete world,
   plus every concealed card of other seats in a seat's view.
 - Invariant: every catalog card is in exactly one place (market, a known reserve, a
-  purchase count, or the unknown set); deck counts are derived in one pass per state
-  (`tier_counts(state).deck` = unknown of the tier − concealed-and-unknown reserves of the
+  purchase count, or the unknown set); deck counts are derived from tier membership
+  (`tier_counts(state, catalog).deck` = unknown of the tier − concealed-and-unknown reserves of the
   tier).
   `omniscient(state)` holds when no identity is null; `knows_own_reserves(state, seat)`
   holds when every reserve of `seat` carries its identity.
